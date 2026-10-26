@@ -226,7 +226,7 @@ def web(out, meta, T, B, rec=None):
     novalue = P[~P.index.isin(unsettled.index)]
     passed = []
     if len(unsettled): passed.append(dict(players=", ".join(unsettled.qb), count=len(unsettled), reason="the starting quarterback isn't settled, so Cyrus won't make a call."))
-    if len(novalue): passed.append(dict(players=", ".join(novalue.qb), count=len(novalue), reason="Cyrus's projection is too close to the casino line to make a call."))
+    if len(novalue): passed.append(dict(players=", ".join(novalue.qb), count=len(novalue), reason="Cyrus's projection is too close to the market line to make a call."))
     data = dict(season=int(meta["season"]), week=int(meta["week"]), updated=run.strftime("%a %b %d, %I:%M %p CT").replace(" 0", " "), sample=False,
                 next_update=["Wed 6:45 PM CT", "Fri 6:45 PM CT"], rb=rb, qb=qb, passed=passed, record=rec)
     with open(f"{out}/latest.js", "w") as f:

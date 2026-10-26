@@ -43,7 +43,7 @@ python3 weekly_props.py log      out/ ledger.csv          # log this week's proj
 
 ## Automation
 
-The whole run is a scheduled task (Wednesday and Friday, 6:45 PM Central) that executes the steps in `docs/weekly_run_instructions.txt`: pull the ledger and the current site from Google Drive, run the five commands, verify the outputs, save a new ledger version to Drive, and deliver the PDF, the site zip and a summary. Nothing is deployed automatically; a human uploads the site.
+The whole run is a scheduled task (Wednesday and Friday, 6:45 PM Central) that executes the steps in `docs/weekly_run_instructions.txt`: pull the ledger from Google Drive and the current site from GitHub, run the five commands, verify the outputs, save a new ledger version to Drive, and deliver the PDF, the site zip and a summary. Nothing is deployed automatically; a human uploads the site.
 
 ## How it was built
 
