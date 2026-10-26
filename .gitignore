@@ -1,0 +1,14 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+__pycache__/
+# downloaded data and run outputs (large, regenerated each run)
+out/
+*/games.csv
+*/pw_*.csv
+*/inj.csv
+# private
+ledger.csv
+*.secret
+.env

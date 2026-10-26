@@ -4,27 +4,27 @@ Player-performance projection and grading pipeline. Every Wednesday and Friday i
 
 Two outputs:
 
-- **RB touchdown probability** — the chance each running back scores a rushing or receiving touchdown.
-- **QB passing yards** — Cyrus's projection beside the market consensus line, and which side of it the model expects.
+- **RB touchdown probability**  -  the chance each running back scores a rushing or receiving touchdown.
+- **QB passing yards**  -  Cyrus's projection beside the market consensus line, and which side of it the model expects.
 
 Every projection carries a confidence and a tier: **Best Bet**, **Bet**, **Lean**, **Recheck** (waiting on an injury decision) or **Pass**. The tier names are the product's public vocabulary; internally they are confidence bands.
 
 ## How it works
 
 ```
-nflverse data ─┐
-               ├─► project ─► report ─► latest.js (website) + PDF (internal)
-market lines ──┘      │
-                      ├─► log    ─► projection ledger (Google Sheet, one new version per run)
-                      └─► grade  ─► WIN / LOSS / VOID from official stats ─► track record
+nflverse data -.
+               +-> project -> report -> latest.js (website) + PDF (internal)
+market lines --'      |
+                      +-> log    -> projection ledger (Google Sheet, one new version per run)
+                      +-> grade  -> WIN / LOSS / VOID from official stats -> track record
 ```
 
 **Model (frozen October 2026).**
 
-- *QB passing yards:* an exponentially weighted baseline from the quarterback's prior starts (half-life 8 games, shrunk toward the league mean), multiplied by an opponent pass-defense factor, plus adjustments fitted on 2021–25 starts for home field, division game, dome, a missing top target, the spread and the game total. The chance of landing on a side is a 50/50 blend of the projection and the market line with a spread of 30% of the mean.
-- *RB touchdown probability:* a shrunk per-game TD rate scaled by the team's implied points for the game, with `P(at least one) = 1 − e^(−λ)`. Tiers by probability: 70%+ Best Bet, 60–70% Bet, otherwise Lean.
+- *QB passing yards:* an exponentially weighted baseline from the quarterback's prior starts (half-life 8 games, shrunk toward the league mean), multiplied by an opponent pass-defense factor, plus adjustments fitted on 2021-25 starts for home field, division game, dome, a missing top target, the spread and the game total. The chance of landing on a side is a 50/50 blend of the projection and the market line with a spread of 30% of the mean.
+- *RB touchdown probability:* a shrunk per-game TD rate scaled by the team's implied points for the game, with `P(at least one) = 1 - exp(-lambda)`. Tiers by probability: 70%+ Best Bet, 60-70% Bet, otherwise Lean.
 
-**Grading rules.** Projections are graded no earlier than 12 hours after kickoff, from nflverse weekly player stats. RB: WIN if rushing + receiving TDs ≥ 1. QB: WIN if yards land on the picked side of the line. VOID if the player has no stats row while his team played. The last projection published before kickoff is the one that counts.
+**Grading rules.** Projections are graded no earlier than 12 hours after kickoff, from nflverse weekly player stats. RB: WIN if rushing + receiving TDs >= 1. QB: WIN if yards land on the picked side of the line. VOID if the player has no stats row while his team played. The last projection published before kickoff is the one that counts.
 
 **Honesty rules baked in.** The pipeline never invents a line, injury status or result; if something is missing, it says so. Weeks before the public record started (2026 Week 8) are graded as tests and labeled that way.
 
@@ -39,7 +39,7 @@ python3 weekly_props.py site     out/ site_current.zip    # drop latest.js into 
 python3 weekly_props.py log      out/ ledger.csv          # log this week's projections to the ledger
 ```
 
-`samples/` has a real week's inputs and outputs: `lines.sample.csv`, `latest.sample.js`, the PDF report, and the ledger column template.
+`samples/` holds a real week's inputs and outputs: `lines.sample.csv`, `latest.sample.js`, `ledger.template.csv` and the PDF report.
 
 ## Automation
 
@@ -49,32 +49,32 @@ The whole run is a scheduled task (Wednesday and Friday, 6:45 PM Central) that e
 
 Built over roughly three weeks in October 2026 by Robert Legorreta, working with several AI models in defined roles. The short version: a spreadsheet became a model, the model became a pipeline, and the pipeline became a scheduled job that publishes to a website.
 
-### Phase 1 — Spreadsheet prototype (Week 6 of the 2026 season)
+### Phase 1  -  Spreadsheet prototype (Week 6 of the 2026 season)
 
 The first version was a Google Sheet. Team offense and defense tables from NFL.com were pasted in each week, defenses were ranked by yards and touchdowns allowed, and quarterback passing-yard projections and running-back touchdown chances were worked out by formula. Projections were labeled Best Bet, Bet or Lean and compared against market lines by hand.
 
 What it proved: the ranking tiers and the market choices (RB anytime TD, QB passing yards) were right. What it exposed: pasting tables every week does not scale, hand comparison against lines is slow, and a sheet cannot grade itself.
 
-### Phase 2 — A scripted model with a fitted adjustment layer
+### Phase 2  -  A scripted model with a fitted adjustment layer
 
 The sheet logic was rebuilt in Python on nflverse's public play and player data, which goes back years and is machine-readable, instead of NFL.com's weekly tables.
 
 - The QB baseline is an exponentially weighted average of the quarterback's prior starts (half-life of eight games), shrunk toward the league mean, multiplied by an opponent pass-defense factor that blends this season with last.
-- On top of that sits a small linear adjustment fitted on 2021–25 regular-season starts: home field, division game (the original sheet's "divisional games run 50–60 yards lower" rule turned out to be real but smaller, about −1.3 yards after the other factors), dome, a missing top target, the point spread and the game total.
+- On top of that sits a small linear adjustment fitted on 2021-25 regular-season starts: home field, division game (the original sheet's "divisional games run 50-60 yards lower" rule turned out to be real but smaller, about -1.3 yards after the other factors), dome, a missing top target, the point spread and the game total.
 - The chance of landing over or under the market line is a 50/50 blend of the projection and the line, with a spread of 30% of the mean. The blend is a deliberate humility setting: the model does not pretend to know more than the market, it looks for the cases where they disagree.
-- RB anytime TD uses a shrunk per-game touchdown rate scaled by the team's implied points for that game, with P(at least one) = 1 − e^(−λ). Tiers are by probability, not price, because the product is a projection, not a wager.
+- RB anytime TD uses a shrunk per-game touchdown rate scaled by the team's implied points for that game, with P(at least one) = 1 - exp(-lambda). Tiers are by probability, not price, because the product is a projection, not a wager.
 
 A decision made early and kept: the method and coefficients are frozen. The job is not allowed to retune itself week to week, so the track record means something.
 
-### Phase 3 — Logging and grading
+### Phase 3  -  Logging and grading
 
 A projection that is not logged before kickoff does not count, so the pipeline writes every Best Bet, Bet, Lean and Recheck to a ledger with a Central-time timestamp before the games, and a later run grades them from the official box score: WIN, LOSS, or VOID if the player did not play. The last card before kickoff is the one that counts, so the Friday refresh replaces Wednesday's rows for games that have not started. The public record starts at 2026 Week 8; earlier weeks are graded as tests and labeled that way.
 
-### Phase 4 — Website output
+### Phase 4  -  Website output
 
 The same run writes `latest.js`, a small data file that the public predictor page at cyrusforgesystems.com renders: this week's projections, the passes with reasons, and the season-to-date accuracy record by market and tier. One decision changed the public page late: odds, prices and units were removed. The site tells people who is likely to score and how many yards a quarterback is projected to throw against the market line, and is judged on right or wrong.
 
-### Phase 5 — Automation
+### Phase 5  -  Automation
 
 The whole run is a scheduled task (Wednesday and Friday, 6:45 PM Central) with the script embedded in its instructions. Each run downloads the ledger and the current site package from Google Drive, runs the five commands, verifies its own outputs (renders the PDF to an image and looks at it, checks the week number, checks the zip contents), saves a new ledger version to Drive, and delivers the PDF, the site zip and a summary. It is told never to invent a line, injury status or result; if something is missing it says so.
 
