@@ -7,7 +7,7 @@ Two outputs:
 - **RB touchdown probability**  -  the chance each running back scores a rushing or receiving touchdown.
 - **QB passing yards**  -  Cyrus's projection beside the market consensus line, and which side of it the model expects.
 
-Every projection carries a confidence and a tier: **Best Bet**, **Bet**, **Lean**, **Recheck** (waiting on an injury decision) or **Pass**. The tier names are the product's public vocabulary; internally they are confidence bands.
+Every projection carries a confidence and a tier: **Strong**, **Moderate**, **Slight**, **Recheck** (waiting on an injury decision) or **Pass**. The tiers are confidence bands; the names were changed from betting vocabulary to analytics vocabulary in Week 8, and the ledger loader maps the old names so the record stays continuous.
 
 ## How it works
 
@@ -22,7 +22,7 @@ market lines --'      |
 **Model (frozen October 2026).**
 
 - *QB passing yards:* an exponentially weighted baseline from the quarterback's prior starts (half-life 8 games, shrunk toward the league mean), multiplied by an opponent pass-defense factor, plus adjustments fitted on 2021-25 starts for home field, division game, dome, a missing top target, the spread and the game total. The chance of landing on a side is a 50/50 blend of the projection and the market line with a spread of 30% of the mean.
-- *RB touchdown probability:* a shrunk per-game TD rate scaled by the team's implied points for the game, with `P(at least one) = 1 - exp(-lambda)`. Tiers by probability: 70%+ Best Bet, 60-70% Bet, otherwise Lean.
+- *RB touchdown probability:* a shrunk per-game TD rate scaled by the team's implied points for the game, with `P(at least one) = 1 - exp(-lambda)`. Tiers by probability: 70%+ Strong, 60-70% Moderate, otherwise Slight.
 
 **Grading rules.** Projections are graded no earlier than 12 hours after kickoff, from nflverse weekly player stats. RB: WIN if rushing + receiving TDs >= 1. QB: WIN if yards land on the picked side of the line. VOID if the player has no stats row while his team played. The last projection published before kickoff is the one that counts.
 
@@ -43,7 +43,7 @@ python3 weekly_props.py log      out/ ledger.csv          # log this week's proj
 
 ## Automation
 
-The whole run is a scheduled task (Wednesday and Friday, 6:45 PM Central) that executes the steps in `docs/weekly_run_instructions.txt`: pull the ledger from Google Drive and the current site from GitHub, run the five commands, verify the outputs, save a new ledger version to Drive, and deliver the PDF, the site zip and a summary. Nothing is deployed automatically; a human uploads the site.
+The whole run is a scheduled task (Wednesday and Friday, 6:45 PM Central) that executes the steps in `docs/weekly_run_instructions.txt`: pull the ledger from Google Drive and the current site from GitHub, run the five commands, verify the outputs, save a new ledger version to Drive, commit the new `data/latest.js` to the website repository on GitHub (the site is a Cloudflare Pages project connected to that repository, so the push is the deployment), and deliver the PDF, a site zip (fallback for a manual upload if the push fails) and a summary.
 
 ## How it was built
 
@@ -68,7 +68,7 @@ A decision made early and kept: the method and coefficients are frozen. The job 
 
 ### Phase 3  -  Logging and grading
 
-A projection that is not logged before kickoff does not count, so the pipeline writes every Best Bet, Bet, Lean and Recheck to a ledger with a Central-time timestamp before the games, and a later run grades them from the official box score: WIN, LOSS, or VOID if the player did not play. The last card before kickoff is the one that counts, so the Friday refresh replaces Wednesday's rows for games that have not started. The public record starts at 2026 Week 8; earlier weeks are graded as tests and labeled that way.
+A projection that is not logged before kickoff does not count, so the pipeline writes every Strong, Moderate, Slight and Recheck call to a ledger with a Central-time timestamp before the games, and a later run grades them from the official box score: WIN, LOSS, or VOID if the player did not play. The last card before kickoff is the one that counts, so the Friday refresh replaces Wednesday's rows for games that have not started. The public record starts at 2026 Week 8; earlier weeks are graded as tests and labeled that way.
 
 ### Phase 4  -  Website output
 
@@ -98,7 +98,7 @@ The project was run as a shared brief with distinct roles: Claude built the mode
 
 ### What's next
 
-Game-level projections (spread and total) as a third output; a backtest of the player model against historical lines; and pushing `latest.js` to the site repository automatically so the weekly update needs no manual upload.
+Game-level projections (spread and total) as a third output; a backtest of the player model against historical lines; and pass attempts as the next model input (see `docs/research-roadmap.md`).
 
 ## Status and limits
 

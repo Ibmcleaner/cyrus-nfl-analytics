@@ -1,13 +1,13 @@
-"""Cyrus weekly NFL props report: QB passing yards (vs book lines) and RB anytime TD.
+"""Cyrus weekly NFL projections report: QB passing yards (vs market lines) and RB anytime TD.
 Usage:
   python3 -I weekly_props.py project OUTDIR          # download nflverse data, write projections
-  python3 -I weekly_props.py report  OUTDIR LINES    # LINES = csv: player,line,over,under (American odds); also writes latest.js
+  python3 -I weekly_props.py report  OUTDIR LINES    # LINES = csv: player,line,over,under (American odds, market prices); also writes latest.js
   python3 -I weekly_props.py grade   OUTDIR LEDGER   # grade past picks in the ledger csv, write record.json (run after project)
   python3 -I weekly_props.py report  OUTDIR LINES    # (see above; uses record.json if present)
   python3 -I weekly_props.py log     OUTDIR LEDGER   # add this week's card to the ledger (latest card before kickoff counts)
   python3 -I weekly_props.py site    OUTDIR SITE_ZIP # unpack the current website (zip from Drive), drop in latest.js, zip it for upload
 Method (frozen Oct 2026): prior-games-only QB baseline x opponent pass-defense factor, plus adjustments fitted on
-2021-25 QB starts (market-informed: uses the game spread/total). Chance = 50/50 blend of projection and book line,
+2021-25 QB starts (market-informed: uses the game spread/total). Chance = 50/50 blend of projection and market line,
 spread = 30% of mean. RB: shrunk TD rate x (implied team points / team average points), P(1+) = 1 - exp(-lambda).
 """
 import sys, os, json, subprocess, datetime as dt
@@ -165,17 +165,17 @@ def report(out, lines_path):
         f = str(r["flags"])
         if "QB " in f and ("Questionable" in f or "Doubtful" in f or "Out" in f or "did not start" in f): tier = "PASS"
         elif "top target" in f and "Questionable" in f: tier = "RECHECK"
-        elif ev >= 0.10 and r.starts >= 20: tier = "BEST BET"
-        elif ev > 0.03: tier = "BET"
-        elif ev > 0: tier = "LEAN"
+        elif ev >= 0.10 and r.starts >= 20: tier = "STRONG"
+        elif ev > 0.03: tier = "MODERATE"
+        elif ev > 0: tier = "SLIGHT"
         else: tier = "PASS"
         rows.append(dict(qb=r.qb, team=r.team, opp=r.opp, home=r.home, kickoff=r.kickoff, kickoff_iso=r.kickoff_iso, proj=r.proj, bet=f"{side} {r.line} ({int(pr):+d})",
                          side=side, line=r.line, price=int(pr), chance=round(ch, 3), ev=round(ev, 3), tier=tier, reason=f, p_over=round(p, 3),
                          starts=r.starts, spread=r.spread, total=r.total, indoor=r.indoor, divgame=r.divgame, def_rank=r.def_rank, def_ypg=r.def_ypg, vs_opp=(r.vs_opp if isinstance(r.vs_opp, str) else "")))
-    for _, l in L[~L.key.isin(Q.key)].iterrows():   # book has a line for a QB the schedule does not list as starter
+    for _, l in L[~L.key.isin(Q.key)].iterrows():   # market has a line for a QB the schedule does not list as starter
         rows.append(dict(qb=l.player, team="", opp="", home=np.nan, kickoff="", kickoff_iso="", proj=np.nan, bet=f"line {l.line}", chance=np.nan, ev=np.nan, tier="PASS",
-                         reason="book lists this QB but the schedule lists a different starter: starter uncertain"))
-    order = {"BEST BET": 0, "BET": 1, "LEAN": 2, "RECHECK": 3, "PASS": 4, "NO LINE": 5}
+                         reason="market lists this QB but the schedule lists a different starter: starter uncertain"))
+    order = {"STRONG": 0, "MODERATE": 1, "SLIGHT": 2, "RECHECK": 3, "PASS": 4, "NO LINE": 5}
     T = pd.DataFrame(rows); T["o"] = T.tier.map(order); T = T.sort_values(["o", "ev"], ascending=[True, False]).drop(columns="o")
     B = rb_card(out)
     T.to_csv(f"{out}/qb_card.csv", index=False)
@@ -197,23 +197,23 @@ def report(out, lines_path):
     T2 = T.copy(); T2["proj"] = T2.proj.map(lambda x: "" if pd.isna(x) else f"{x:.0f}"); T2["chance"] = T2.chance.map(lambda x: "" if pd.isna(x) else f"{x:.0%}"); T2["ev"] = T2.ev.map(lambda x: "" if pd.isna(x) else f"{x:+.2f}")
     B2 = B.head(12).copy(); B2["chance"] = B2.chance.map(lambda x: f"{x:.0%}")
     doc = SimpleDocTemplate(f"{out}/Cyrus_Props_Report_{meta['season']}_W{meta['week']:02d}.pdf", pagesize=landscape(letter), leftMargin=30, rightMargin=30, topMargin=28, bottomMargin=28)
-    st = [Paragraph(f"Cyrus NFL Props Report - {meta['season']} Week {meta['week']}", H)]
+    st = [Paragraph(f"Cyrus NFL Projections Report - {meta['season']} Week {meta['week']}", H)]
     if rec:
         st += [Paragraph(f"<b>Track record</b> ({rec['label']}). Graded picks only; voids (player did not play) are excluded. "
-                         "RB rows have no book price, so judge them by hit rate against the expected rate.", S)]
+                         "RB rows have no market price, so judge them by hit rate against the expected rate.", S)]
         if rec["rows"]:
             R2 = pd.DataFrame(rec["rows"]); R2["units"] = R2.units.map(lambda x: "" if x is None or pd.isna(x) else f"{x:+.2f}")
             R2["win_pct"] = R2.win_pct.map(lambda x: f"{x:.0%}"); R2["expected_pct"] = R2.expected_pct.map(lambda x: f"{x:.0%}")
             st += [tbl(R2, ["market", "tier", "picks", "wins", "losses", "voids", "win_pct", "expected_pct", "units"],
-                       ["Market", "Tier", "Graded", "Won", "Lost", "Void", "Hit rate", "Expected", "Units (1/pick)"], [90, 70, 50, 45, 45, 45, 60, 60, 90]), Spacer(1, 6)]
+                       ["Market", "Tier", "Graded", "Right", "Wrong", "Void", "Hit rate", "Expected", "Units (1/call)"], [90, 70, 50, 45, 45, 45, 60, 60, 90]), Spacer(1, 6)]
         for t in rec.get("tests", []):
             st += [Paragraph(t, S)]
-    st += [Paragraph(f"Run {meta['run_ct']}. Data: nflverse schedules, player stats and injury report ({meta['injury_rows']} injury rows this week); book lines from public odds pages at run time. "
-                    "Model is market-informed and not yet backtested against prop lines: treat picks as small, flat-stake leans. Check inactives about 90 minutes before kickoff.", S), Spacer(1, 6),
-          Paragraph("<b>RB anytime touchdown</b> (tier by chance: 70%+ Best Bet, 60-70% Bet; bet only if the book pays longer than fair odds)", S),
+    st += [Paragraph(f"Run {meta['run_ct']}. Data: nflverse schedules, player stats and injury report ({meta['injury_rows']} injury rows this week); market lines from public odds pages at run time. "
+                    "Model is market-informed and not yet backtested against prop lines: treat every call as a projection with limited confidence, not a recommendation. Check inactives about 90 minutes before kickoff.", S), Spacer(1, 6),
+          Paragraph("<b>RB anytime touchdown</b> (tier by chance: 70%+ Strong, 60-70% Moderate, below that Slight; fair odds is the price that matches the chance)", S),
           tbl(B2, ["tier", "rb", "team", "opp", "kickoff", "tds", "games", "chance", "fair_odds", "flags"], ["Tier", "RB", "Team", "Opp", "Kickoff", "TDs", "G", "Chance", "Fair odds", "Flags"], [52, 110, 34, 34, 112, 30, 24, 44, 50, 230]), Spacer(1, 8),
-          Paragraph("<b>QB passing yards</b> (chance = 50/50 blend of projection and book line; value = expected profit per $1)", S),
-          tbl(T2, ["tier", "qb", "team", "opp", "kickoff", "proj", "bet", "chance", "ev", "reason"], ["Tier", "QB", "Team", "Opp", "Kickoff", "Proj", "Bet (price)", "Chance", "Value", "Flags / PASS reason"], [52, 100, 32, 32, 112, 32, 96, 42, 38, 194])]
+          Paragraph("<b>QB passing yards</b> (chance = 50/50 blend of projection and market line; value = projected edge per unit)", S),
+          tbl(T2, ["tier", "qb", "team", "opp", "kickoff", "proj", "bet", "chance", "ev", "reason"], ["Tier", "QB", "Team", "Opp", "Kickoff", "Proj", "Call (price)", "Chance", "Value", "Flags / PASS reason"], [52, 100, 32, 32, 112, 32, 96, 42, 38, 194])]
     doc.build(st)
     print(T.to_string(index=False)); print(B.head(12).to_string(index=False))
 
@@ -223,7 +223,7 @@ def game(r):
 
 def rb_card(out):
     B = pd.read_csv(f"{out}/rb.csv", dtype={"fair_odds": str, "vs_opp": str}).fillna({"flags": "", "vs_opp": ""})
-    B["tier"] = np.where(B.chance >= 0.70, "BEST BET", np.where(B.chance >= 0.60, "BET", "LEAN"))
+    B["tier"] = np.where(B.chance >= 0.70, "STRONG", np.where(B.chance >= 0.60, "MODERATE", "SLIGHT"))
     return B
 
 
@@ -231,7 +231,15 @@ TEAM = {"ARI": "Arizona", "ATL": "Atlanta", "BAL": "Baltimore", "BUF": "Buffalo"
         "DAL": "Dallas", "DEN": "Denver", "DET": "Detroit", "GB": "Green Bay", "HOU": "Houston", "IND": "Indianapolis", "JAX": "Jacksonville", "KC": "Kansas City",
         "LA": "the Rams", "LAC": "the Chargers", "LV": "Las Vegas", "MIA": "Miami", "MIN": "Minnesota", "NE": "New England", "NO": "New Orleans", "NYG": "the Giants",
         "NYJ": "the Jets", "PHI": "Philadelphia", "PIT": "Pittsburgh", "SEA": "Seattle", "SF": "San Francisco", "TB": "Tampa Bay", "TEN": "Tennessee", "WAS": "Washington"}
-VERDICT = {"BEST BET": "Strong projection", "BET": "Confident projection", "LEAN": "Slight lean", "RECHECK": "Waiting on an injury decision", "PASS": "No call", "NO LINE": "No market line yet"}
+VERDICT = {"STRONG": "Strong projection", "MODERATE": "Moderate projection", "SLIGHT": "Slight lean", "RECHECK": "Waiting on an injury decision", "PASS": "No call", "NO LINE": "No market line yet"}
+LEGACY_TIER = {"BEST BET": "STRONG", "BET": "MODERATE", "LEAN": "SLIGHT"}   # tier names used before 2026 Week 8 Friday
+
+def verb(name, sing, plur):
+    """Team names that start with 'the' (the Rams) are plural: 'the Rams allow', 'Dallas allows'."""
+    return plur if name.startswith("the ") else sing
+
+def cap(text):
+    return text[0].upper() + text[1:] if text else text
 
 def ordinal(n):
     n = int(n); return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
@@ -263,14 +271,14 @@ def explain_qb(r):
     add(big, f"Cyrus projects {int(r.proj)} yards against a line of {r.line}: a {abs(gap):.0f}-yard gap " + (f"in favor of the {side}." if big else "which is too close to call with confidence."))
     # opponent pass defense
     weak = int(r.def_rank) >= 21; strong = int(r.def_rank) <= 10
-    dtxt = f"{opp} allows {r.def_ypg:.0f} passing yards per game this season, {rank_txt(r.def_rank)}."
+    dtxt = cap(f"{opp} {verb(opp, 'allows', 'allow')} {r.def_ypg:.0f} passing yards per game this season, {rank_txt(r.def_rank)}.")
     if weak or strong: add((weak and side == "over") or (strong and side == "under"), dtxt)
     else: cons.append(dtxt + " That is middle of the pack, so the matchup does not push either way.")
     # game script
     sp = float(r.spread)
     if abs(sp) >= 3:
         fav = sp < 0
-        txt = (f"{team} is favored by {abs(sp):.1f}, and teams that lead tend to run more and throw less late." if fav else f"{team} is a {abs(sp):.1f}-point underdog, and teams that trail tend to throw more.")
+        txt = cap(f"{team} {verb(team, 'is', 'are')} favored by {abs(sp):.1f}, and teams that lead tend to run more and throw less late." if fav else f"{team} {verb(team, 'is a', 'are a')} {abs(sp):.1f}-point underdog, and teams that trail tend to throw more.")
         add((fav and side == "under") or ((not fav) and side == "over"), txt)
     tot = float(r.total)
     if tot >= 47 or tot <= 41:
@@ -292,9 +300,9 @@ def explain_qb(r):
         if len(vals) >= 2: add((over_n / len(vals) >= 0.6 and side == "over") or (over_n / len(vals) <= 0.4 and side == "under"), htxt)
         else: history.append(htxt)
     ch = int(round(float(r.chance) * 100))
-    if r.tier in ("BEST BET", "BET", "LEAN"):
+    if r.tier in ("STRONG", "MODERATE", "SLIGHT"):
         summary = f"Cyrus leans {side} {r.line} for {r.qb} ({ch}% chance). {VERDICT[r.tier]}."
-        if r.tier == "LEAN" and len(cons) > len(pros): summary += " Most of the visible factors point the other way, which is why this is only a lean."
+        if r.tier == "SLIGHT" and len(cons) > len(pros): summary += " Most of the visible factors point the other way, which is why this is only a lean."
     elif r.tier == "RECHECK":
         summary = f"Cyrus leans {side} {r.line} for {r.qb} ({ch}% chance) but is waiting on an injury decision before calling it."
     else:
@@ -309,7 +317,7 @@ def explain_rb(r):
     add(rate >= 0.6, f"{r.rb} has {int(r.tds)} touchdown{'s' if int(r.tds) != 1 else ''} in {int(r.games)} game{'s' if int(r.games) != 1 else ''} this season ({rate:.2f} per game).")
     add(float(r.prior_rate) >= 0.5, f"Last season's pace, blended with the league average, puts his underlying rate at {r.prior_rate:.2f} touchdowns per game.")
     weak = int(r.td_rank) >= 21; strong = int(r.td_rank) <= 10
-    dtxt = f"{opp} allows {r.td_pg:.2f} rushing and receiving touchdowns per game this season, {rank_txt(r.td_rank)}."
+    dtxt = cap(f"{opp} {verb(opp, 'allows', 'allow')} {r.td_pg:.2f} rushing and receiving touchdowns per game this season, {rank_txt(r.td_rank)}.")
     if weak or strong: add(weak, dtxt)
     else: cons.append(dtxt + " That is an average matchup.")
     add(float(r.implied) >= 24, f"The market implies about {r.implied:.0f} points for {team} in this game (their season average is {r.tavg:.0f}).")
@@ -324,18 +332,18 @@ def explain_rb(r):
         if len(vals) >= 2: add(scored / len(vals) >= 0.5, htxt)
         else: history.append(htxt)
     pct = int(round(ch * 100))
-    if r.tier in ("BEST BET", "BET"): summary = f"Cyrus gives {r.rb} a {pct}% chance to score. {VERDICT[r.tier]}."
+    if r.tier in ("STRONG", "MODERATE"): summary = f"Cyrus gives {r.rb} a {pct}% chance to score. {VERDICT[r.tier]}."
     elif ch >= 0.5: summary = f"Cyrus gives {r.rb} a {pct}% chance to score: better than even, but not enough for a confident call."
     else: summary = f"Cyrus gives {r.rb} a {pct}% chance to score, which is below even money. Not a call this week."
     tier = r.tier if ch >= 0.5 else "PASS"
-    return dict(verdict=(VERDICT[tier] if tier != "LEAN" else "Slight lean"), summary=summary, pros=pros, cons=cons, history=history)
+    return dict(verdict=VERDICT[tier], summary=summary, pros=pros, cons=cons, history=history)
 
 def web(out, meta, T, B, rec=None):
     """Write latest.js for the website's NFL Predictor page (cyrusforgesystems.com/cyrus/nfl-predictor/)."""
     run = dt.datetime.strptime(meta["run_ct"], "%Y-%m-%d %I:%M %p CT")
     rb = [dict(tier=r.tier, player=r.rb, game=game(r), kickoff=r.kickoff, chance=int(round(r.chance * 100)), note=str(r.flags))
           for r in B[B.chance >= 0.50].head(12).itertuples()]
-    shown = T[T.tier.isin(["BEST BET", "BET", "LEAN", "RECHECK"])]
+    shown = T[T.tier.isin(["STRONG", "MODERATE", "SLIGHT", "RECHECK"])]
     qb = [dict(tier=r.tier, player=r.qb, game=game(r), kickoff=r.kickoff, pick=f"{r.side.capitalize()} {r.line}", line=float(r.line),
                projection=int(r.proj), chance=int(round(r.chance * 100)),
                note=(str(r.reason).split("top target ")[-1] if r.tier == "RECHECK" else "")) for r in shown.itertuples()]
@@ -375,6 +383,7 @@ def load_ledger(path):
     for c in ["season", "week", "official"]:
         L[c] = L[c].map(lambda x: str(int(float(x))) if str(x).strip() else "")
     L["result"] = L.result.str.strip().str.upper()
+    L["tier"] = L.tier.str.strip().str.upper().map(lambda t: LEGACY_TIER.get(t, t))
     return L
 
 def num(x):
@@ -394,7 +403,7 @@ def summarize(L, season):
         rows.append(dict(market=mk, tier=tier, picks=len(dd), wins=w, losses=l, voids=int((d.result == "VOID").sum()),
                          win_pct=(w / len(dd) if len(dd) else 0.0), expected_pct=(dd.chance.map(num).mean() if len(dd) else 0.0),
                          units=(round(float(u), 2) if u is not None else None)))
-    order = {"BEST BET": 0, "BET": 1, "LEAN": 2, "RECHECK": 3}
+    order = {"STRONG": 0, "MODERATE": 1, "SLIGHT": 2, "RECHECK": 3}
     rows.sort(key=lambda r: (r["market"] != "RB TD", order.get(r["tier"], 9)))
     weeks = sorted(set(G.week.astype(int)))
     label = ((f"{season} Week {min(weeks)}" if len(weeks) == 1 else f"{season} Weeks {min(weeks)}-{max(weeks)}") if weeks else f"starts with {season} Week {START_WEEK}; no official week graded yet")
@@ -403,8 +412,8 @@ def summarize(L, season):
     for wk, d in T.groupby("week"):
         parts = []
         for mk, m in d.groupby("market"):
-            sel = m[m.tier.isin(["BEST BET", "BET"])]
-            if len(sel): parts.append(f"{mk} Best Bet + Bet {int((sel.result == 'WIN').sum())}-{int((sel.result == 'LOSS').sum())}")
+            sel = m[m.tier.isin(["STRONG", "MODERATE"])]
+            if len(sel): parts.append(f"{mk} Strong + Moderate {int((sel.result == 'WIN').sum())}-{int((sel.result == 'LOSS').sum())}")
         if parts: tests.append(f"Test week {wk} (before the public record): " + "; ".join(parts) + ".")
     return dict(season=int(season), start_week=START_WEEK, through_week=(max(weeks) if weeks else None), label=label, rows=rows, tests=tests)
 
@@ -452,7 +461,7 @@ def log(out, ledger_path):
     L = L[~(same & L.kickoff_iso.map(future))]
     new = []
     T = pd.read_csv(f"{out}/qb_card.csv").fillna("")
-    for r in T[T.tier.isin(["BEST BET", "BET", "LEAN", "RECHECK"])].itertuples():
+    for r in T[T.tier.isin(["STRONG", "MODERATE", "SLIGHT", "RECHECK"])].itertuples():
         if not future(r.kickoff_iso): continue
         new.append(dict(market="QB YDS", tier=r.tier, player=r.qb, team=r.team, opp=r.opp, kickoff=r.kickoff, kickoff_iso=r.kickoff_iso,
                         pick=f"{r.side.capitalize()} {r.line}", line=str(r.line), price=str(int(r.price)), fair_odds="", chance=str(r.chance), value=f"{r.ev:+.2f}"))
