@@ -3,7 +3,8 @@
 
 Reads the pick ledger (CSV exported from the newest "Cyrus Pick Ledger - ..." sheet) and the
 GitHub commit history of the website's data/latest.js, and writes data/chronicle.js: a
-week-by-week record for both markets plus a log of every run that produced a card and
+week-by-week record for both markets (headline = Strong + Moderate calls; Slight and Recheck
+counted separately; all tiers also totaled) plus a log of every run that produced a card and
 whether it published itself.
 
 Usage:
@@ -53,7 +54,20 @@ def load_ledger(path):
     return out
 
 
-def tally(rows):
+CORE_TIERS = ("STRONG", "MODERATE")   # the headline record counts these; Slight and Recheck are shown separately
+
+
+def tally(rows, split=True):
+    """Counts for a set of ledger rows. With split=True the dict also carries 'core' (Strong + Moderate)
+    and 'slight' (everything else: Slight, Recheck) sub-tallies; the top-level numbers are all tiers."""
+    t = _tally(rows)
+    if split:
+        t["core"] = _tally([r for r in rows if r["tier"] in CORE_TIERS])
+        t["slight"] = _tally([r for r in rows if r["tier"] not in CORE_TIERS])
+    return t
+
+
+def _tally(rows):
     graded = [r for r in rows if r["result"] in ("WIN", "LOSS")]
     voids = sum(1 for r in rows if r["result"] == "VOID")
     wins = sum(1 for r in graded if r["result"] == "WIN")
@@ -144,10 +158,14 @@ def build(ledger, commits, season, milestones):
     O = [r for r in L if r["official"] == "1"]
     totals = dict(rb=tally([r for r in O if r["market"] == "RB TD"]), qb=tally([r for r in O if r["market"] == "QB YDS"]))
     graded_weeks = [w["week"] for w in out_weeks if w["official"] and w["status"] in ("graded", "partial")]
+    last = max(graded_weeks) if graded_weeks else None
+    last_week = next((w for w in out_weeks if w["week"] == last), None)
     label = (f"{season} Weeks {min(graded_weeks)}-{max(graded_weeks)}" if len(graded_weeks) > 1 else
              (f"{season} Week {graded_weeks[0]}" if graded_weeks else f"no official week graded yet"))
     return dict(season=int(season), start_week=START_WEEK, generated=fmt_ct(dt.datetime.now(CT)), label=label,
-                weeks=out_weeks, totals=totals, milestones=milestones)
+                core_tiers=list(CORE_TIERS), weeks=out_weeks, totals=totals,
+                last_week=(dict(week=last, rb=last_week["rb"], qb=last_week["qb"]) if last_week else None),
+                milestones=milestones)
 
 
 def main(argv):
@@ -164,13 +182,16 @@ def main(argv):
     data = build(ledger, commits, season, milestones)
     with open(argv[3], "w", encoding="utf-8") as f:
         f.write("// Season chronicle, written by chronicle.py from the pick ledger and the site's commit history. Times are Central.\n")
-        f.write("window.CYRUS_CHRONICLE = " + json.dumps(data, indent=2) + ";\n")
+        f.write("window.CYRUS_CHRONICLE = " + json.dumps(data, indent=1) + ";\n")
     for w in data["weeks"]:
         rb, qb = w["rb"], w["qb"]
         print(f"Week {w['week']:>2} {'official' if w['official'] else 'test    '} {w['status']:<8} "
-              f"RB {rb['wins']}-{rb['losses']} ({rb['voids']} void)  QB {qb['wins']}-{qb['losses']}  runs: "
+              f"RB S+M {rb['core']['wins']}-{rb['core']['losses']} (all {rb['wins']}-{rb['losses']}, {rb['voids']} void)  "
+              f"QB S+M {qb['core']['wins']}-{qb['core']['losses']} (all {qb['wins']}-{qb['losses']})  runs: "
               + "; ".join(f"{r.get('day')} {r.get('published')}" for r in w["runs"]))
-    print(f"totals (official): RB {data['totals']['rb']['wins']}-{data['totals']['rb']['losses']}, QB {data['totals']['qb']['wins']}-{data['totals']['qb']['losses']}  [{data['label']}]")
+    T = data["totals"]
+    print(f"totals (official, Strong + Moderate): RB {T['rb']['core']['wins']}-{T['rb']['core']['losses']}, QB {T['qb']['core']['wins']}-{T['qb']['core']['losses']}  "
+          f"(all tiers: RB {T['rb']['wins']}-{T['rb']['losses']}, QB {T['qb']['wins']}-{T['qb']['losses']})  [{data['label']}]")
     return 0
 
 
