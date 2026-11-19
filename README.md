@@ -45,6 +45,8 @@ python3 weekly_props.py log      out/ ledger.csv          # log this week's proj
 
 The whole run is a scheduled task (Wednesday and Friday, 6:45 PM Central) that executes the steps in `docs/weekly_run_instructions.txt`: pull the ledger from Google Drive and the current site from GitHub, run the five commands, verify the outputs, save a new ledger version to Drive, commit the new `data/latest.js` to the website repository on GitHub (the site is a Cloudflare Pages project connected to that repository, so the push is the deployment), and deliver the PDF, a site zip (fallback for a manual upload if the push fails) and a summary.
 
+A separate, independent checker runs the next morning at 7:30 AM Central. It reads the latest commit to `data/latest.js` on GitHub, the `week` and `updated` stamps on the live site, and the newest ledger sheet in Drive, and reports PUBLISHED, PARTIAL or NOT PUBLISHED. It only verifies; it never fixes or pushes anything.
+
 ## How it was built
 
 Built over roughly three weeks in October 2026 by Robert Legorreta, working with several AI models in defined roles. The short version: a spreadsheet became a model, the model became a pipeline, and the pipeline became a scheduled job that publishes to a website.
@@ -96,13 +98,17 @@ The project was run as a shared brief with distinct roles: Claude built the mode
 - **A column named `div`.** pandas rows expose a `.div()` method, so a column called `div` silently returned a function instead of a value. Renamed to `divgame`.
 - **Scope creep, declined.** Spreads and game totals were on the wish list from day one. They were cut from version one so the two prop markets could be shipped, logged and graded first. They are next.
 
+### Milestones
+
+- **First clean end-to-end run  -  November 18, 2026 (2026 Week 11).** The Wednesday 6:45 PM Central job completed every step on its own for the first time, with no hand on it anywhere: projections built, `data/latest.js` committed to the website repository at 6:48 PM CT ("Week 11 card (Wed run, 2026-11-18 CT)"), Cloudflare Pages deployed it to cyrusforgesystems.com, and the ledger sheet "Cyrus Pick Ledger - 2026 W11 (Wed Nov 18)" was saved to Google Drive at 6:51 PM CT. The independent checker confirmed all three the next morning. Every earlier run had needed a manual step somewhere along the way: a zip upload, a re-push, or a repair to the ledger. From the first spreadsheet in Week 6 to a hands-off publish in Week 11 took about five weeks.
+
 ### What's next
 
 Game-level projections (spread and total) as a third output; a backtest of the player model against historical lines; and pass attempts as the next model input (see `docs/research-roadmap.md`).
 
 ## Status and limits
 
-- Live since October 2026; the public track record starts with 2026 Week 8.
+- Live since October 2026; the public track record starts with 2026 Week 8. First fully automated publish without manual intervention: 2026 Week 11 (November 18, 2026).
 - The model is market-informed (it uses the spread and total) and has not yet been backtested against historical player lines. Treat the output as research and decision support.
 - An accuracy record needs roughly 100 graded projections before hit rates mean much.
 
