@@ -258,95 +258,155 @@ def parse_hist(s):
             sw, v = part.split(":"); out.append((sw, float(v)))
     return out[-6:]
 
+def _rank(items):
+    """Sort (weight, text) pairs by weight, strongest first; return the texts."""
+    return [t for _, t in sorted(items, key=lambda x: -x[0])]
+
+def _join(parts):
+    parts = [p for p in parts if p]
+    if not parts: return ""
+    if len(parts) == 1: return parts[0]
+    return ", and ".join([", ".join(parts[:-1]), parts[-1]]) if len(parts) > 2 else f"{parts[0]}, and {parts[1]}"
+
+def _num(x):
+    """7.0 -> '7', 6.5 -> '6.5'."""
+    x = float(x); return f"{int(x)}" if x == int(x) else f"{x:.1f}"
+
+def _an(n):
+    """'a 24-yard' / 'an 18-yard'."""
+    return "an" if str(int(n)).startswith(("8", "11", "18")) else "a"
+
+def _sentence(text):
+    text = text.strip()
+    return cap(text) + ("" if text.endswith((".", "!", "?")) else ".") if text else ""
+
 def explain_qb(r):
-    """Plain-language verdict for one quarterback row of the card. Returns dict(verdict, summary, pros, cons, history)."""
+    """Analyst-style read on one quarterback row. Every sentence is a template filled with the model's own inputs;
+    nothing is written by a language model. Returns dict(verdict, summary, take, pros, cons, history).
+    pros/cons are ordered strongest factor first; take is the one-paragraph version the card shows."""
     opp = TEAM.get(r.opp, r.opp); team = TEAM.get(r.team, r.team)
     if r.tier == "NO LINE":
-        return dict(verdict=VERDICT["NO LINE"], summary=f"Cyrus projects {int(r.proj)} passing yards for {r.qb}, but no market line was posted at update time, so there is nothing to compare it with yet.", pros=[], cons=[], history=[])
+        take = f"Cyrus projects {int(r.proj)} passing yards for {r.qb}, but no market line was posted at update time, so there is nothing to measure it against yet."
+        return dict(verdict=VERDICT["NO LINE"], summary=take, take=take, pros=[], cons=[], history=[])
     side = "over" if r.side == "OVER" else "under"; gap = float(r.proj) - float(r.line)
     pros, cons = [], []
-    def add(ok, text): (pros if ok else cons).append(text)
-    # projection vs line
+    def add(ok, w, text): (pros if ok else cons).append((w, text))
+    # 1. projection vs line (the biggest factor by construction)
     big = abs(gap) >= 15
-    add(big, f"Cyrus projects {int(r.proj)} yards against a line of {r.line}: a {abs(gap):.0f}-yard gap " + (f"in favor of the {side}." if big else "which is too close to call with confidence."))
-    # opponent pass defense
-    weak = int(r.def_rank) >= 21; strong = int(r.def_rank) <= 10
-    dtxt = cap(f"{opp} {verb(opp, 'allows', 'allow')} {r.def_ypg:.0f} passing yards per game this season, {rank_txt(r.def_rank)}.")
-    if weak or strong: add((weak and side == "over") or (strong and side == "under"), dtxt)
-    else: cons.append(dtxt + " That is middle of the pack, so the matchup does not push either way.")
-    # game script
+    if big: add(True, abs(gap) / 5, f"Cyrus has him at {int(r.proj)} yards against a {r.line} line, {_an(abs(gap))} {abs(gap):.0f}-yard edge to the {side}")
+    elif abs(gap) < 1: add(False, 3.0, f"the projection ({int(r.proj)}) sits right on the line ({r.line})")
+    else: add(False, 3 - abs(gap) / 5, f"the projection ({int(r.proj)}) sits only {abs(gap):.0f} yard{'s' if abs(gap) >= 1.5 else ''} from the line ({r.line}), too close to lean on hard")
+    # 2. opponent pass defense
+    rk = int(r.def_rank); weak = rk >= 21; strong = rk <= 10; dw = abs(rk - 16.5) / 4
+    if weak: add(side == "over", dw, f"{opp} {verb(opp, 'gives', 'give')} up {r.def_ypg:.0f} passing yards a game, {rank_txt(rk)}")
+    elif strong: add(side == "under", dw, f"{opp} {verb(opp, 'allows', 'allow')} just {r.def_ypg:.0f} passing yards a game, {rank_txt(rk)}")
+    else: add(False, 0.5, f"the matchup is neutral ({opp} {verb(opp, 'allows', 'allow')} {r.def_ypg:.0f} passing yards a game, {rank_txt(rk)})")
+    # 3. game script: spread and total
     sp = float(r.spread)
     if abs(sp) >= 3:
         fav = sp < 0
-        txt = cap(f"{team} {verb(team, 'is', 'are')} favored by {abs(sp):.1f}, and teams that lead tend to run more and throw less late." if fav else f"{team} {verb(team, 'is a', 'are a')} {abs(sp):.1f}-point underdog, and teams that trail tend to throw more.")
-        add((fav and side == "under") or ((not fav) and side == "over"), txt)
+        txt = (f"{team} {verb(team, 'is', 'are')} favored by {_num(abs(sp))} (front-running teams throw less late)" if fav
+               else f"{team} {verb(team, 'is', 'are')} {_an(abs(sp))} {_num(abs(sp))}-point underdog (trailing teams throw more)")
+        add((fav and side == "under") or ((not fav) and side == "over"), abs(sp) / 4, txt)
     tot = float(r.total)
     if tot >= 47 or tot <= 41:
-        add((tot >= 47 and side == "over") or (tot <= 41 and side == "under"), f"The game total is {tot:.1f}, which the market reads as a {'high' if tot >= 47 else 'low'}-scoring game.")
-    if int(r.divgame): add(side == "under", "Division game: familiar opponents, and passing yards run lower on average in these matchups.")
-    if int(r.indoor): add(side == "over", "Indoors, where passing numbers run a little higher.")
+        add((tot >= 47 and side == "over") or (tot <= 41 and side == "under"), abs(tot - 44) / 3,
+            f"a {tot:.1f} total says the market expects a {'high' if tot >= 47 else 'low'}-scoring game")
+    if int(r.divgame): add(side == "under", 1.0, "it is a division game, where passing yards run lower on average")
+    if int(r.indoor): add(side == "over", 0.8, "it is indoors, where passing numbers run a touch higher")
+    # 4. injuries and starter status
     f = str(r.reason)
-    if "top target" in f and ("Out" in f or "Doubtful" in f): add(side == "under", "His top target is listed Out or Doubtful, which costs a starting quarterback roughly 9 yards on average.")
-    if "top target" in f and "Questionable" in f: cons.append("His top target is Questionable; Cyrus waits for the final injury report before making this call.")
-    if "QB " in f and ("Questionable" in f or "Doubtful" in f or "Out" in f): cons.append("The quarterback himself is on the injury report, so his status is not settled.")
-    if "did not start" in f or "starter uncertain" in f: cons.append("The schedule and the box score disagree about who starts, so Cyrus will not make a call until that is clear.")
-    if int(r.starts) < 20: cons.append(f"Only {int(r.starts)} starts on record, so the projection rests on a thin history.")
-    # history vs opponent
+    if "top target" in f and ("Out" in f or "Doubtful" in f): add(side == "under", 2.5, "his top target is Out or Doubtful, which costs a starter about 9 yards on average")
+    if "top target" in f and "Questionable" in f: add(False, 2.0, "his top target is Questionable, so this call waits on the final injury report")
+    if "QB " in f and ("Questionable" in f or "Doubtful" in f or "Out" in f): add(False, 2.5, "the quarterback himself is on the injury report")
+    if "did not start" in f or "starter uncertain" in f: add(False, 3.0, "the schedule and the box score disagree about who starts")
+    if int(r.starts) < 20: add(False, 1.0, f"only {int(r.starts)} starts on record, so the history is thin")
+    # 5. history vs this opponent
     hist = parse_hist(r.vs_opp); history = []
     if hist:
         vals = [v for _, v in hist]; over_n = sum(1 for v in vals if v > float(r.line))
         history = [f"{sw.replace('w', ' Wk ')}: {int(v)} yds" for sw, v in hist]
-        htxt = f"In his last {len(vals)} meeting{'s' if len(vals) > 1 else ''} with {opp} he averaged {sum(vals)/len(vals):.0f} yards and went over {r.line} {over_n} time{'s' if over_n != 1 else ''}."
-        if len(vals) >= 2: add((over_n / len(vals) >= 0.6 and side == "over") or (over_n / len(vals) <= 0.4 and side == "under"), htxt)
-        else: history.append(htxt)
+        if over_n == 0: went = f"never went over {r.line}"
+        elif over_n == len(vals) and len(vals) > 1: went = f"went over {r.line} every time"
+        else: went = f"went over {r.line} {over_n} time{'s' if over_n != 1 else ''}"
+        htxt = f"in his last {len(vals)} meeting{'s' if len(vals) > 1 else ''} with {opp} he averaged {sum(vals)/len(vals):.0f} yards and {went}"
+        if len(vals) >= 2:
+            share = over_n / len(vals)
+            if share >= 0.6 or share <= 0.4: add((share >= 0.6 and side == "over") or (share <= 0.4 and side == "under"), 1.5, htxt)
+            else: history.append(cap(htxt) + ".")
+        else: history.append(cap(htxt) + ".")
+    P, C = _rank(pros), _rank(cons)
     ch = int(round(float(r.chance) * 100))
     if r.tier in ("STRONG", "MODERATE", "SLIGHT"):
         summary = f"Cyrus leans {side} {r.line} for {r.qb} ({ch}% chance). {VERDICT[r.tier]}."
-        if r.tier == "SLIGHT" and len(cons) > len(pros): summary += " Most of the visible factors point the other way, which is why this is only a lean."
+        take = _sentence(f"the case for the {side} on {r.qb}: {_join(P[:2])}") if P else _sentence(f"Cyrus leans {side} {r.line} on {r.qb} at {ch}%")
+        if C: take += " " + _sentence(f"the catch: {C[0]}")
+        if r.tier == "SLIGHT" and len(C) > len(P): take += " Most of the visible factors point the other way, which is why this is only a lean."
     elif r.tier == "RECHECK":
         summary = f"Cyrus leans {side} {r.line} for {r.qb} ({ch}% chance) but is waiting on an injury decision before calling it."
+        take = _sentence(f"Cyrus leans {side} {r.line} on {r.qb}" + (f": {P[0]}" if P else "")) + " " + _sentence(f"but it is not a call yet: {C[0]}" if C else "but it is waiting on the injury report")
     else:
         summary = f"Not a call this week. Cyrus leans {side} {r.line} for {r.qb}, but only at {ch}%, which is not enough of an edge to publish."
-    return dict(verdict=VERDICT[r.tier], summary=summary, pros=pros, cons=cons, history=history)
+        take = _sentence(f"why {r.qb} is off the card: {_join(C[:2])}") if C else _sentence(f"{r.qb} is off the card")
+        take += " " + (_sentence(f"there is a case for the {side} ({P[0]}), but at {ch}% it is not enough of an edge to publish") if P else _sentence(f"at {ch}% there is not enough of an edge either way to publish"))
+    return dict(verdict=VERDICT[r.tier], summary=summary, take=take, pros=[_sentence(t) for t in P], cons=[_sentence(t) for t in C], history=history)
 
 def explain_rb(r):
+    """Analyst-style read on one running-back row; same rules as explain_qb."""
     opp = TEAM.get(r.opp, r.opp); team = TEAM.get(r.team, r.team)
     ch = float(r.chance); pros, cons = [], []
-    def add(ok, text): (pros if ok else cons).append(text)
-    rate = float(r.tds) / max(int(r.games), 1)
-    add(rate >= 0.6, f"{r.rb} has {int(r.tds)} touchdown{'s' if int(r.tds) != 1 else ''} in {int(r.games)} game{'s' if int(r.games) != 1 else ''} this season ({rate:.2f} per game).")
-    add(float(r.prior_rate) >= 0.5, f"Last season's pace, blended with the league average, puts his underlying rate at {r.prior_rate:.2f} touchdowns per game.")
-    weak = int(r.td_rank) >= 21; strong = int(r.td_rank) <= 10
-    dtxt = cap(f"{opp} {verb(opp, 'allows', 'allow')} {r.td_pg:.2f} rushing and receiving touchdowns per game this season, {rank_txt(r.td_rank)}.")
-    if weak or strong: add(weak, dtxt)
-    else: cons.append(dtxt + " That is an average matchup.")
-    add(float(r.implied) >= 24, f"The market implies about {r.implied:.0f} points for {team} in this game (their season average is {r.tavg:.0f}).")
+    def add(ok, w, text): (pros if ok else cons).append((w, text))
+    tds, games = int(r.tds), max(int(r.games), 1); rate = tds / games
+    tdw = f"{tds} TD{'s' if tds != 1 else ''} in {games} game{'s' if games != 1 else ''}"
+    if rate >= 0.6: add(True, abs(rate - 0.5) * 8, f"he is finding the end zone {rate:.2f} times a game this season ({tdw})")
+    elif tds == 0: add(False, 4.5, f"he has not scored in {games} game{'s' if games != 1 else ''} this season")
+    else: add(False, abs(rate - 0.5) * 8 + 0.5, f"he has {tdw} this season ({rate:.2f} a game)")
+    pr = float(r.prior_rate)
+    if pr >= 0.5: add(True, abs(pr - 0.5) * 6, f"his longer track record is solid ({pr:.2f} TDs a game going back to last season)")
+    else: add(False, abs(pr - 0.5) * 6 + 0.3, f"his longer track record is thinner ({pr:.2f} TDs a game going back to last season)")
+    rk = int(r.td_rank); dw = abs(rk - 16.5) / 4
+    if rk >= 21: add(True, dw, f"{opp} {verb(opp, 'gives', 'give')} up {r.td_pg:.1f} rushing-and-receiving TDs a game to backs, {rank_txt(rk)}")
+    elif rk <= 10: add(False, dw, f"{opp} {verb(opp, 'allows', 'allow')} just {r.td_pg:.1f} rushing-and-receiving TDs a game, {rank_txt(rk)}")
+    else: add(False, 0.4, f"the matchup is middle of the road ({opp} {verb(opp, 'allows', 'allow')} {r.td_pg:.1f} TDs a game, {rank_txt(rk)})")
+    imp = float(r.implied)
+    if imp >= 24: add(True, (imp - 22) / 2, f"the market expects {team} to score about {imp:.0f} points (their season average is {r.tavg:.0f})")
+    elif imp <= 20: add(False, (22 - imp) / 2, f"the market only has {team} at about {imp:.0f} points (fewer team points, fewer scoring chances)")
     f = str(r.flags)
-    if "Questionable" in f: cons.append("He is listed Questionable; check the final injury report before kickoff.")
-    if "missed" in f: cons.append("He missed his team's last game, so his role this week is less certain.")
+    if "Questionable" in f: add(False, 3.0, "he is listed Questionable, so check the final injury report before kickoff")
+    if "missed" in f: add(False, 2.5, "he missed his team's last game, so his workload this week is less certain")
     hist = parse_hist(r.vs_opp); history = []
     if hist:
         vals = [v for _, v in hist]; scored = sum(1 for v in vals if v >= 1)
         history = [f"{sw.replace('w', ' Wk ')}: {int(v)} TD" for sw, v in hist]
-        htxt = f"He has scored in {scored} of his last {len(vals)} meeting{'s' if len(vals) > 1 else ''} with {opp}."
-        if len(vals) >= 2: add(scored / len(vals) >= 0.5, htxt)
-        else: history.append(htxt)
+        htxt = f"he has scored in {scored} of his last {len(vals)} meeting{'s' if len(vals) > 1 else ''} with {opp}"
+        if len(vals) >= 2: add(scored / len(vals) >= 0.5, 1.5, htxt)
+        else: history.append(cap(htxt) + ".")
+    P, C = _rank(pros), _rank(cons)
     pct = int(round(ch * 100))
-    if r.tier in ("STRONG", "MODERATE"): summary = f"Cyrus gives {r.rb} a {pct}% chance to score. {VERDICT[r.tier]}."
-    elif ch >= 0.5: summary = f"Cyrus gives {r.rb} a {pct}% chance to score: better than even, but not enough for a confident call."
-    else: summary = f"Cyrus gives {r.rb} a {pct}% chance to score, which is below even money. Not a call this week."
+    if r.tier in ("STRONG", "MODERATE"):
+        summary = f"Cyrus gives {r.rb} a {pct}% chance to score. {VERDICT[r.tier]}."
+        take = _sentence(f"the case for {r.rb}: {_join(P[:2])}") if P else _sentence(f"Cyrus gives {r.rb} a {pct}% chance to score")
+        take += " " + (_sentence(f"the catch: {C[0]}") if C else "Cyrus sees little working against him this week.")
+    elif ch >= 0.5:
+        summary = f"Cyrus gives {r.rb} a {pct}% chance to score: better than even, but not enough for a confident call."
+        take = _sentence(f"why {r.rb} is off the card: {_join(C[:2])}") if C else _sentence(f"{r.rb} is off the card")
+        take += " " + (_sentence(f"in his favor, {P[0]}, but at {pct}% that is better than a coin flip, not a call") if P else _sentence(f"at {pct}% that is better than a coin flip, not a call"))
+    else:
+        summary = f"Cyrus gives {r.rb} a {pct}% chance to score, which is below even money. Not a call this week."
+        take = _sentence(f"why {r.rb} is off the card: {_join(C[:2])}") if C else _sentence(f"why {r.rb} is off the card: nothing stands out against him, but the inputs only add up to {pct}%")
+        take += " " + (_sentence(f"in his favor, {P[0]}, but Cyrus still has him below even money at {pct}%") if P else _sentence(f"Cyrus has him below even money at {pct}%"))
     tier = r.tier if ch >= 0.5 else "PASS"
-    return dict(verdict=VERDICT[tier], summary=summary, pros=pros, cons=cons, history=history)
+    return dict(verdict=VERDICT[tier], summary=summary, take=take, pros=[_sentence(t) for t in P], cons=[_sentence(t) for t in C], history=history)
 
 def web(out, meta, T, B, rec=None):
     """Write latest.js for the website's NFL Predictor page (cyrusforgesystems.com/cyrus/nfl-predictor/)."""
     run = dt.datetime.strptime(meta["run_ct"], "%Y-%m-%d %I:%M %p CT")
-    rb = [dict(tier=r.tier, player=r.rb, game=game(r), kickoff=r.kickoff, chance=int(round(r.chance * 100)), note=str(r.flags))
+    rb = [dict(tier=r.tier, player=r.rb, game=game(r), kickoff=r.kickoff, chance=int(round(r.chance * 100)), note=str(r.flags), why=explain_rb(r)["take"])
           for r in B[B.chance >= 0.50].head(12).itertuples()]
     shown = T[T.tier.isin(["STRONG", "MODERATE", "SLIGHT", "RECHECK"])]
     qb = [dict(tier=r.tier, player=r.qb, game=game(r), kickoff=r.kickoff, pick=f"{r.side.capitalize()} {r.line}", line=float(r.line),
                projection=int(r.proj), chance=int(round(r.chance * 100)),
-               note=(str(r.reason).split("top target ")[-1] if r.tier == "RECHECK" else "")) for r in shown.itertuples()]
+               note=(str(r.reason).split("top target ")[-1] if r.tier == "RECHECK" else ""), why=explain_qb(r)["take"]) for r in shown.itertuples()]
     P = T[T.tier == "PASS"]
     unsettled = P[P.reason.str.contains("QB |starter uncertain|did not start", regex=True)]
     novalue = P[~P.index.isin(unsettled.index)]
