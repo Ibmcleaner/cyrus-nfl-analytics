@@ -2,5 +2,6 @@
   {"date": "Oct 25, 2026", "text": "Week 7: first card produced by the pipeline, graded as a test before the public record."},
   {"date": "Oct 28, 2026", "text": "Week 8: the public record begins. Tier names changed from betting vocabulary (Best Bet / Bet / Lean) to Strong / Moderate / Slight."},
   {"date": "Nov 2026", "text": "The website became a Cloudflare Pages project connected to GitHub: a commit to data/latest.js is the deployment."},
-  {"date": "Nov 18, 2026", "text": "Week 11: first clean end-to-end run. The scheduled job built the card, pushed it to GitHub (6:48 PM CT), the site deployed itself, and the ledger was saved to Drive (6:51 PM CT) with no hand on any step. The independent checker confirmed all three the next morning."}
+  {"date": "Nov 18, 2026", "text": "Week 11: first clean end-to-end run. The scheduled job built the card, pushed it to GitHub (6:48 PM CT), the site deployed itself, and the ledger was saved to Drive (6:51 PM CT) with no hand on any step. The independent checker confirmed all three the next morning."},
+  {"date": "Nov 20, 2026", "text": "Week 11: first clean Friday run, and the first week with both scheduled runs (Wed and Fri) published automatically. The Friday job pushed the card to GitHub (6:47 PM CT) and saved the ledger to Drive (6:49 PM CT) with no hand on any step."}
 ]
