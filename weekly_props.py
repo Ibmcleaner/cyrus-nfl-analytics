@@ -364,6 +364,7 @@ def explain_qb(r):
         take = ((_sentence(f"the case for the {side} on {r.qb}: {_join(Pt[:2])}") if Pt else _sentence(f"Cyrus leans {side} {r.line} on {r.qb} at {ch}%"))) + " " + matchup
         if Ct: take += " " + _sentence(f"the catch: {Ct[0]}")
         if r.tier == "SLIGHT" and len(Ct) > len(Pt): take += " Most of the visible factors point the other way, which is why this is only a lean."
+        if "capped at Moderate" in f: take += f" Only {int(r.starts)} start{'s' if int(r.starts) != 1 else ''} on record, so Cyrus caps this at Moderate until the history is deeper."
     elif r.tier == "RECHECK":
         summary = f"Cyrus leans {side} {r.line} for {r.qb} ({ch}% chance) but is waiting on an injury decision before calling it."
         take = (_sentence(f"Cyrus leans {side} {r.line} on {r.qb}" + (f": {Pt[0]}" if Pt else "")) + " " + _sentence(f"but it is not a call yet: {Ct[0]}" if Ct else "but it is waiting on the injury report")) + " " + matchup
