@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 CT = ZoneInfo("America/Chicago")
 START_WEEK = 8   # public track record starts with 2026 Week 8; earlier weeks are graded as tests
 LEDGER_COLS = ["season", "week", "official", "market", "tier", "player", "team", "opp", "kickoff", "kickoff_iso", "pick", "line", "price",
-               "fair_odds", "chance", "value", "logged_ct", "stat", "result", "units"]
+               "fair_odds", "chance", "value", "logged_ct", "stat", "result", "units", "lineup"]
 
 def now_ct():
     return dt.datetime.now(CT).replace(tzinfo=None)
@@ -40,6 +40,51 @@ def ct_kick(gameday, gametime):
 def ct_iso(gameday, gametime):
     return (dt.datetime.strptime(f"{gameday} {gametime}", "%Y-%m-%d %H:%M") - dt.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M")
 
+SLOT_NAMES = {"LT": "LT", "LG": "LG", "C": "C", "RG": "RG", "RT": "RT", "TE": "TE", "RB": "RB", "QB": "QB", "WR": "WR"}
+ORD = {1: "1st", 2: "2nd", 3: "3rd", 4: "4th", 5: "5th"}
+
+def missing_starters(out, status, season):
+    """Read the ESPN depth chart (nflverse mirror) and the injury report; for each team list the offensive starters
+    who are Out or Doubtful and who steps in (and from how deep on the chart). Recorded and stated on every call,
+    not weighted: the 2026 season gathers the evidence, and version 2 sets any weights from it.
+    Returns team -> dict(items=[...], qb=text for QB calls, rb=text for RB calls, right=bool, left=bool)."""
+    try:
+        fetch(f"{BASE}/depth_charts/depth_charts_{season}.csv", f"{out}/dc.csv")
+        D = pd.read_csv(f"{out}/dc.csv", low_memory=False, usecols=["dt", "team", "player_name", "gsis_id", "pos_grp", "pos_abb", "pos_slot", "pos_rank"])
+    except Exception:
+        return {}
+    D = D[D.dt == D.dt.max()]
+    D = D[D.pos_abb.isin(["QB", "RB", "WR", "TE", "LT", "LG", "C", "RG", "RT"]) & ~D.pos_grp.str.contains("D|Special", regex=True)]
+    res = {}
+    rows = []
+    for tm, T in D.groupby("team"):
+        items = []; out_slots = set()
+        wr_n = 0
+        for (slot, pos), S in sorted(T.groupby(["pos_slot", "pos_abb"]), key=lambda x: x[0][0]):
+            S = S.sort_values("pos_rank"); chain = list(S.itertuples())
+            if not chain: continue
+            if pos == "WR": wr_n += 1
+            label = f"WR{wr_n}" if pos == "WR" else pos
+            st = status.get(chain[0].gsis_id, "")
+            if st not in ("Out", "Doubtful"): continue
+            fill = next(((i, c) for i, c in enumerate(chain[1:], start=2) if status.get(c.gsis_id, "") not in ("Out", "Doubtful")), None)
+            fill_txt = f"{fill[1].player_name} ({ORD.get(fill[0], str(fill[0]))}-string) steps in" if fill else "no listed replacement"
+            items.append(dict(team=tm, slot=label, starter=chain[0].player_name, starter_id=chain[0].gsis_id, status=st, fill=(fill[1].player_name if fill else ""), fill_depth=(fill[0] if fill else 0), text=f"{label} {chain[0].player_name} ({st}; {fill_txt})"))
+            out_slots.add(label)
+        right = {"RG", "RT"} <= out_slots; left = {"LT", "LG"} <= out_slots
+        res[tm] = dict(items=items, right=right, left=left,
+                       qb="; ".join(i["text"] for i in items if i["slot"] != "QB"),
+                       rb="; ".join(i["text"] for i in items if i["slot"] not in ("QB", "RB")))
+        rows += items
+    pd.DataFrame(rows, columns=["team", "slot", "starter", "starter_id", "status", "fill", "fill_depth", "text"]).to_csv(f"{out}/missing_starters.csv", index=False)
+    return res
+
+def lineup_note(team_name, txt, right=False, left=False):
+    """One plain sentence for the card: who is missing and who steps in. Recorded, not weighed."""
+    if not txt: return ""
+    side = " The right side of the line is on backups." if right else (" The left side of the line is on backups." if left else "")
+    return f"Lineup: {team_name} {'is' if not team_name.startswith('the ') else 'are'} without {txt}.{side} Cyrus records this but does not yet weigh it."
+
 def project(out):
     os.makedirs(out, exist_ok=True)
     fetch(GAMES, f"{out}/games.csv")
@@ -56,6 +101,7 @@ def project(out):
     except Exception:
         inj = pd.DataFrame(columns=["gsis_id", "report_status"])
     status = dict(zip(inj.gsis_id, inj.report_status.fillna("")))
+    lineup = missing_starters(out, status, season)   # team -> dict(qb=text, rb=text, flags=...) from the ESPN depth chart vs the injury report
     P = pd.concat([pd.read_csv(f"{out}/pw_{y}.csv", low_memory=False) for y in range(season - 3, season + 1)])
     P = P[P.season_type == "REG"]
     g = g[g.season >= season - 3]
@@ -108,7 +154,8 @@ def project(out):
             hist = hist[(hist.qb == qb) & ((hist.home_team == opp) | (hist.away_team == opp))].sort_values(["season", "week"])
             rows.append(dict(qb=qbn, team=tm, opp=opp, home=home, kickoff=ct_kick(r.gameday, r.gametime), kickoff_iso=ct_iso(r.gameday, r.gametime), starts=len(y), proj=round(base * fac + adj),
                              spread=spread, total=r.total_line, indoor=indoor, divgame=int(DV[tm] == DV[opp]), def_rank=int(allowed.pass_rank.get(opp, 16)), def_ypg=round(float(allowed.pypg.get(opp, lg)), 1),
-                             vs_opp="|".join(f"{int(s)}w{int(w)}:{int(v)}" for s, w, v in zip(hist.season, hist.week, hist.passing_yards)), flags="; ".join(flags)))
+                             vs_opp="|".join(f"{int(s)}w{int(w)}:{int(v)}" for s, w, v in zip(hist.season, hist.week, hist.passing_yards)), flags="; ".join(flags),
+                             lineup=lineup.get(tm, {}).get("qb", ""), line_right=int(lineup.get(tm, {}).get("right", False)), line_left=int(lineup.get(tm, {}).get("left", False))))
     pd.DataFrame(rows).to_csv(f"{out}/qb_proj.csv", index=False)
     # RB anytime TD
     pts = []
@@ -156,7 +203,8 @@ def project(out):
                                    chance=round(p, 3), fair_odds=(f"{-100*p/(1-p):.0f}" if p > 0.5 else f"+{100*(1-p)/p:.0f}"), implied=round(float(implied), 1), tavg=round(float(tavg), 1),
                                    td_rank=int(allowed.td_rank.get(opp, 16)), td_pg=round(float(allowed.tdpg.get(opp, 1.5)), 2), prior_rate=round(float(prior), 2),
                                    run_rank=int(allowed.run_rank.get(opp, 16)), run_ypg=round(float(allowed.rypg.get(opp, 115)), 1),
-                                   vs_opp="|".join(f"{int(s)}w{int(w)}:{int(v)}" for s, w, v in zip(h.season, h.week, h.td)), flags="; ".join(fl)))
+                                   vs_opp="|".join(f"{int(s)}w{int(w)}:{int(v)}" for s, w, v in zip(h.season, h.week, h.td)), flags="; ".join(fl),
+                                   lineup=lineup.get(tm, {}).get("rb", ""), line_right=int(lineup.get(tm, {}).get("right", False)), line_left=int(lineup.get(tm, {}).get("left", False))))
     pd.DataFrame(out_rb).sort_values("chance", ascending=False).to_csv(f"{out}/rb.csv", index=False)
     meta = dict(season=season, week=week, games=len(UP), injury_rows=len(inj), run_ct=now_ct().strftime("%Y-%m-%d %I:%M %p CT"))
     json.dump(meta, open(f"{out}/meta.json", "w"))
@@ -173,7 +221,7 @@ def report(out, lines_path):
     rows = []
     for _, r in M.iterrows():
         if pd.isna(r.line):
-            rows.append(dict(**r[["qb", "team", "opp", "home", "kickoff", "kickoff_iso", "proj", "starts", "spread", "total", "indoor", "divgame", "def_rank", "def_ypg", "vs_opp"]].to_dict(), bet="", chance=np.nan, ev=np.nan, tier="NO LINE", reason=str(r["flags"]))); continue
+            rows.append(dict(**r[["qb", "team", "opp", "home", "kickoff", "kickoff_iso", "proj", "starts", "spread", "total", "indoor", "divgame", "def_rank", "def_ypg", "vs_opp", "lineup", "line_right", "line_left"]].to_dict(), bet="", chance=np.nan, ev=np.nan, tier="NO LINE", reason=str(r["flags"]))); continue
         mean = (r.proj + r.line) / 2; p = 1 - cdf((r.line - mean) / (0.30 * mean))
         evo = p * prof(r.over) - (1 - p) if not pd.isna(r.over) else -9
         evu = (1 - p) * prof(r.under) - p if not pd.isna(r.under) else -9
@@ -189,7 +237,8 @@ def report(out, lines_path):
         else: tier = "PASS"
         rows.append(dict(qb=r.qb, team=r.team, opp=r.opp, home=r.home, kickoff=r.kickoff, kickoff_iso=r.kickoff_iso, proj=r.proj, bet=f"{side} {r.line} ({int(pr):+d})",
                          side=side, line=r.line, price=int(pr), chance=round(ch, 3), ev=round(ev, 3), tier=tier, reason=f, p_over=round(p, 3),
-                         starts=r.starts, spread=r.spread, total=r.total, indoor=r.indoor, divgame=r.divgame, def_rank=r.def_rank, def_ypg=r.def_ypg, vs_opp=(r.vs_opp if isinstance(r.vs_opp, str) else "")))
+                         starts=r.starts, spread=r.spread, total=r.total, indoor=r.indoor, divgame=r.divgame, def_rank=r.def_rank, def_ypg=r.def_ypg, vs_opp=(r.vs_opp if isinstance(r.vs_opp, str) else ""),
+                         lineup=(r.lineup if isinstance(r.lineup, str) else ""), line_right=int(r.line_right or 0), line_left=int(r.line_left or 0)))
     for _, l in L[~L.key.isin(Q.key)].iterrows():   # market has a line for a QB the schedule does not list as starter
         rows.append(dict(qb=l.player, team="", opp="", home=np.nan, kickoff="", kickoff_iso="", proj=np.nan, bet=f"line {l.line}", chance=np.nan, ev=np.nan, tier="PASS",
                          reason="market lists this QB but the schedule lists a different starter: starter uncertain"))
@@ -240,7 +289,7 @@ def game(r):
     return f"{r.team} vs {r.opp}" if r.home == 1 else f"{r.team} @ {r.opp}"
 
 def rb_card(out):
-    B = pd.read_csv(f"{out}/rb.csv", dtype={"fair_odds": str, "vs_opp": str}).fillna({"flags": "", "vs_opp": ""})
+    B = pd.read_csv(f"{out}/rb.csv", dtype={"fair_odds": str, "vs_opp": str, "lineup": str}).fillna({"flags": "", "vs_opp": "", "lineup": ""})
     B["tier"] = np.where(B.chance >= 0.70, "STRONG", np.where(B.chance >= 0.60, "MODERATE", "SLIGHT"))
     return B
 
@@ -298,6 +347,10 @@ def _sentence(text):
     text = text.strip()
     return cap(text) + ("" if text.endswith((".", "!", "?")) else ".") if text else ""
 
+def _lineup(r):
+    txt = getattr(r, "lineup", ""); txt = txt if isinstance(txt, str) else ""
+    return lineup_note(TEAM.get(r.team, r.team), txt, bool(int(getattr(r, "line_right", 0) or 0)), bool(int(getattr(r, "line_left", 0) or 0)))
+
 def explain_qb(r):
     """Analyst-style read on one quarterback row. Every sentence is a template filled with the model's own inputs;
     nothing is written by a language model. Returns dict(verdict, summary, take, pros, cons, history).
@@ -324,7 +377,7 @@ def explain_qb(r):
     # 3. game script: spread and total
     sp = float(r.spread)
     if abs(sp) >= 3:
-        fav = sp < 0
+        fav = sp > 0   # spread is this team's margin: positive = favored (same convention as the projection)
         txt = (f"{team} {verb(team, 'is', 'are')} favored by {_num(abs(sp))} (front-running teams throw less late)" if fav
                else f"{team} {verb(team, 'is', 'are')} {_an(abs(sp))} {_num(abs(sp))}-point underdog (trailing teams throw more)")
         add((fav and side == "under") or ((not fav) and side == "over"), abs(sp) / 4, txt)
@@ -372,7 +425,9 @@ def explain_qb(r):
         summary = f"Not a call this week. Cyrus leans {side} {r.line} for {r.qb}, but only at {ch}%, which is not enough of an edge to publish."
         take = ((_sentence(f"why {r.qb} is off the card: {_join(Ct[:2])}") if Ct else _sentence(f"{r.qb} is off the card"))) + " " + matchup
         take += " " + (_sentence(f"there is a case for the {side} ({Pt[0]}), but at {ch}% it is not enough of an edge to publish") if Pt else _sentence(f"at {ch}% there is not enough of an edge either way to publish"))
-    return dict(verdict=VERDICT[r.tier], summary=summary, take=take, pros=[_sentence(t) for t in P], cons=[_sentence(t) for t in C], history=history)
+    ln = _lineup(r)
+    if ln: take += " " + ln
+    return dict(verdict=VERDICT[r.tier], summary=summary, take=take, pros=[_sentence(t) for t in P], cons=[_sentence(t) for t in C], history=history, lineup=ln)
 
 def explain_rb(r):
     """Analyst-style read on one running-back row; same rules as explain_qb."""
@@ -435,7 +490,9 @@ def explain_rb(r):
         take = ((_sentence(f"why {r.rb} is off the card: {_join(Ct[:2])}") if Ct else _sentence(f"why {r.rb} is off the card: nothing stands out against him, but the inputs only add up to {pct}%"))) + " " + matchup
         take += " " + (_sentence(f"in his favor, {Pt[0]}, but Cyrus still has him below even money at {pct}%") if Pt else _sentence(f"Cyrus has him below even money at {pct}%"))
     tier = r.tier if ch >= 0.5 else "PASS"
-    return dict(verdict=VERDICT[tier], summary=summary, take=take, pros=[_sentence(t) for t in P], cons=[_sentence(t) for t in C], history=history)
+    ln = _lineup(r)
+    if ln: take += " " + ln
+    return dict(verdict=VERDICT[tier], summary=summary, take=take, pros=[_sentence(t) for t in P], cons=[_sentence(t) for t in C], history=history, lineup=ln)
 
 def web(out, meta, T, B, rec=None):
     """Write latest.js for the website's NFL Predictor page (cyrusforgesystems.com/cyrus/nfl-predictor/)."""
@@ -557,18 +614,18 @@ def log(out, ledger_path):
     L = load_ledger(ledger_path); now = now_ct(); stamp = now.strftime("%Y-%m-%d %I:%M %p CT")
     def future(iso): return bool(iso) and dt.datetime.strptime(iso, "%Y-%m-%dT%H:%M") > now
     same = (L.season.astype(str) == str(season)) & (L.week.astype(str) == str(week)) & (L.result == "")
-    L = L[~(same & L.kickoff_iso.map(future))]
+    L = L[~(same & L.kickoff_iso.map(future).astype(bool))]
     new = []
     T = pd.read_csv(f"{out}/qb_card.csv").fillna("")
     for r in T[T.tier.isin(["STRONG", "MODERATE", "SLIGHT", "RECHECK"])].itertuples():
         if not future(r.kickoff_iso): continue
         new.append(dict(market="QB YDS", tier=r.tier, player=r.qb, team=r.team, opp=r.opp, kickoff=r.kickoff, kickoff_iso=r.kickoff_iso,
-                        pick=f"{r.side.capitalize()} {r.line}", line=str(r.line), price=str(int(r.price)), fair_odds="", chance=str(r.chance), value=f"{r.ev:+.2f}"))
+                        pick=f"{r.side.capitalize()} {r.line}", line=str(r.line), price=str(int(r.price)), fair_odds="", chance=str(r.chance), value=f"{r.ev:+.2f}", lineup=(r.lineup if isinstance(r.lineup, str) else "")))
     B = rb_card(out)
     for r in B[B.chance >= 0.50].head(12).itertuples():
         if not future(r.kickoff_iso): continue
         new.append(dict(market="RB TD", tier=r.tier, player=r.rb, team=r.team, opp=r.opp, kickoff=r.kickoff, kickoff_iso=r.kickoff_iso,
-                        pick="Anytime TD", line="", price="", fair_odds=str(r.fair_odds), chance=str(r.chance), value=""))
+                        pick="Anytime TD", line="", price="", fair_odds=str(r.fair_odds), chance=str(r.chance), value="", lineup=(r.lineup if isinstance(r.lineup, str) else "")))
     for d in new:
         d.update(season=str(season), week=str(week), official=("1" if week >= START_WEEK else "0"), logged_ct=stamp, stat="", result="", units="")
     L = pd.concat([L, pd.DataFrame(new, columns=LEDGER_COLS)], ignore_index=True)
