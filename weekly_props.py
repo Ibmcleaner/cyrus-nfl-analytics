@@ -181,7 +181,9 @@ def report(out, lines_path):
         f = str(r["flags"])
         if "QB " in f and ("Questionable" in f or "Doubtful" in f or "Out" in f or "did not start" in f): tier = "PASS"
         elif "top target" in f and "Questionable" in f: tier = "RECHECK"
+        elif ch < 0.52: tier = "PASS"; f = (f + "; " if f else "") + "chance below 52%"   # a coin flip is not a call, whatever the price
         elif ev >= 0.10 and r.starts >= 20: tier = "STRONG"
+        elif ev >= 0.10: tier = "MODERATE"; f = (f + "; " if f else "") + "capped at Moderate: fewer than 20 starts"
         elif ev > 0.03: tier = "MODERATE"
         elif ev > 0: tier = "SLIGHT"
         else: tier = "PASS"
@@ -192,7 +194,7 @@ def report(out, lines_path):
         rows.append(dict(qb=l.player, team="", opp="", home=np.nan, kickoff="", kickoff_iso="", proj=np.nan, bet=f"line {l.line}", chance=np.nan, ev=np.nan, tier="PASS",
                          reason="market lists this QB but the schedule lists a different starter: starter uncertain"))
     order = {"STRONG": 0, "MODERATE": 1, "SLIGHT": 2, "RECHECK": 3, "PASS": 4, "NO LINE": 5}
-    T = pd.DataFrame(rows); T["o"] = T.tier.map(order); T = T.sort_values(["o", "ev"], ascending=[True, False]).drop(columns="o")
+    T = pd.DataFrame(rows); T["o"] = T.tier.map(order); T = T.sort_values(["o", "chance"], ascending=[True, False]).drop(columns="o")   # within a tier, highest chance first
     B = rb_card(out)
     T.to_csv(f"{out}/qb_card.csv", index=False)
     rec = json.load(open(f"{out}/record.json")) if os.path.exists(f"{out}/record.json") else None
@@ -338,7 +340,8 @@ def explain_qb(r):
     if "top target" in f and "Questionable" in f: add(False, 2.0, "his top target is Questionable, so this call waits on the final injury report")
     if "QB " in f and ("Questionable" in f or "Doubtful" in f or "Out" in f): add(False, 2.5, "the quarterback himself is on the injury report")
     if "did not start" in f or "starter uncertain" in f: add(False, 3.0, "the schedule and the box score disagree about who starts")
-    if int(r.starts) < 20: add(False, 1.0, f"only {int(r.starts)} starts on record, so the history is thin")
+    if "capped at Moderate" in f: add(False, 1.2, f"only {int(r.starts)} starts on record, so Cyrus caps this at Moderate until the history is deeper")
+    elif int(r.starts) < 20: add(False, 1.0, f"only {int(r.starts)} starts on record, so the history is thin")
     # 5. history vs this opponent
     hist = parse_hist(r.vs_opp); history = []
     if hist:
