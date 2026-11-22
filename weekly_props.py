@@ -127,7 +127,21 @@ def project(out):
             implied = r.total_line / 2 + spread / 2
             s, c = TP.loc[tm] if tm in TP.index else (0, 0)
             tavg = (s + 4 * 22.5) / (c + 4)
-            for _, b in curb[(curb.team == tm) & (curb.gms >= 3) & (curb.car >= 9)].iterrows():
+            leads = curb[(curb.team == tm) & (curb.gms >= 3) & (curb.car >= 9)]
+            cands = [(b, "") for _, b in leads.iterrows()]
+            # a lead back ruled Out or Doubtful hands the role to the next back by carries: judge him on his games as the lead
+            for _, lead in leads.iterrows():
+                if status.get(lead.player_id, "") not in ("Out", "Doubtful"): continue
+                nxt = curb[(curb.team == tm) & (curb.player_id != lead.player_id) & (curb.car < 9)].sort_values("car", ascending=False)
+                nxt = [n for _, n in nxt.iterrows() if status.get(n.player_id, "") not in ("Out", "Doubtful")]
+                if not nxt: continue
+                n = nxt[0].copy()
+                lead_wks = set(rb[(rb.season == season) & (rb.player_id == lead.player_id) & (rb.carries.fillna(0) > 0)].week)
+                solo = rb[(rb.season == season) & (rb.player_id == n.player_id) & ~rb.week.isin(lead_wks)]
+                if len(solo): n["td"], n["gms"] = solo.td.sum(), len(solo)
+                n["fill_in"] = f"fills in for {lead.player_display_name} ({status[lead.player_id]}); {len(solo)} game{'s' if len(solo) != 1 else ''} as the lead back"
+                cands.append((n, n["fill_in"]))
+            for b, fill in cands:
                 st = status.get(b.player_id, "")
                 if st in ("Out", "Doubtful"): continue
                 prior = m if pd.isna(b.tdp) else (b.tdp + 3 * m) / (b.gp + 3)
@@ -135,7 +149,8 @@ def project(out):
                 p = 1 - np.exp(-lam)
                 fl = []
                 if st: fl.append(st)
-                if b.lastwk != team_last.get(tm, b.lastwk): fl.append("missed team's last game")
+                if fill: fl.append(fill)
+                elif b.lastwk != team_last.get(tm, b.lastwk): fl.append("missed team's last game")
                 h = rb[(rb.player_id == b.player_id) & (rb.opponent_team == opp)].sort_values(["season", "week"])
                 out_rb.append(dict(rb=b.player_display_name, team=tm, opp=opp, home=home, kickoff=ct_kick(r.gameday, r.gametime), kickoff_iso=ct_iso(r.gameday, r.gametime), tds=int(b.td), games=int(b.gms),
                                    chance=round(p, 3), fair_odds=(f"{-100*p/(1-p):.0f}" if p > 0.5 else f"+{100*(1-p)/p:.0f}"), implied=round(float(implied), 1), tavg=round(float(tavg), 1),
@@ -361,10 +376,16 @@ def explain_rb(r):
     ch = float(r.chance); pros, cons = [], []
     def add(ok, w, text): (pros if ok else cons).append((w, text))
     tds, games = int(r.tds), max(int(r.games), 1); rate = tds / games
+    f = str(r.flags); fill = "fills in for" in f
+    role = "as the lead back" if fill else "this season"
     tdw = f"{tds} TD{'s' if tds != 1 else ''} in {games} game{'s' if games != 1 else ''}"
-    if rate >= 0.6: add(True, abs(rate - 0.5) * 8, f"he is finding the end zone {rate:.2f} times a game this season ({tdw})")
-    elif tds == 0: add(False, 4.5, f"he has not scored in {games} game{'s' if games != 1 else ''} this season")
-    else: add(False, abs(rate - 0.5) * 8 + 0.5, f"he has {tdw} this season ({rate:.2f} a game)")
+    if fill:
+        # a fill-in starter: the number comes from his games with the starter out, shrunk hard toward the league average
+        lead = f.split("fills in for ")[1].split(";")[0]
+        add(False, 3.0, f"he steps in for {lead}, and {games} game{'s' if games != 1 else ''} in the lead role is a thin sample, so the number leans on the league average")
+    if rate >= 0.6: add(True, min(abs(rate - 0.5) * 8, 6.0 if fill else 99), f"he is finding the end zone {rate:.2f} times a game {role} ({tdw})")
+    elif tds == 0: add(False, 4.5, f"he has not scored in {games} game{'s' if games != 1 else ''} {role}")
+    else: add(False, abs(rate - 0.5) * 8 + 0.5, f"he has {tdw} {role} ({rate:.2f} a game)")
     pr = float(r.prior_rate)
     if pr >= 0.5: add(True, abs(pr - 0.5) * 6, f"his longer track record is solid ({pr:.2f} TDs a game going back to last season)")
     else: add(False, abs(pr - 0.5) * 6 + 0.3, f"his longer track record is thinner ({pr:.2f} TDs a game going back to last season)")
@@ -385,7 +406,6 @@ def explain_rb(r):
     imp = float(r.implied)
     if imp >= 24: add(True, (imp - 22) / 2, f"the market expects {team} to score about {imp:.0f} points (their season average is {r.tavg:.0f})")
     elif imp <= 20: add(False, (22 - imp) / 2, f"the market only has {team} at about {imp:.0f} points (fewer team points, fewer scoring chances)")
-    f = str(r.flags)
     if "Questionable" in f: add(False, 3.0, "he is listed Questionable, so check the final injury report before kickoff")
     if "missed" in f: add(False, 2.5, "he missed his team's last game, so his workload this week is less certain")
     hist = parse_hist(r.vs_opp); history = []
