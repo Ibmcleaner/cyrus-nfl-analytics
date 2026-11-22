@@ -30,7 +30,7 @@ STEPS
 8. Run: python3 -I ~/cyrus_props/code/weekly_props.py log <workdir> <workdir>/ledger.csv
    This adds this card's Strong, Moderate, Slight and Recheck calls to the ledger. The latest card before kickoff counts, so a Friday run replaces Wednesday's rows for games that have not started.
 9. Check: open the PDF (render a page to an image and look at it) to confirm it is readable; confirm latest.js shows the right season and week; confirm the zip lists index.html, assets/, cyrus/ and data/latest.js; confirm ledger.csv still has every earlier row plus the new ones.
-10. Save the updated ledger to Google Drive with the Google Drive create-file tool: title "Cyrus Pick Ledger - <season> W<week, two digits> (<Wed or Fri> <Mon DD>)", e.g. "Cyrus Pick Ledger - 2026 W08 (Wed Oct 28)"; parentId <DRIVE_FOLDER_ID>; contentMimeType text/csv; textContent = the full text of <workdir>/ledger.csv . Keep the viewUrl it returns. Do not delete or edit older ledger files.
+10. Save the updated ledger to Google Drive with the Google Drive create-file tool: title "Cyrus Pick Ledger - <season> W<week, two digits> (<Wed, Fri or Sat> <Mon DD>)", e.g. "Cyrus Pick Ledger - 2026 W08 (Wed Oct 28)"; parentId <DRIVE_FOLDER_ID>; contentMimeType text/csv; textContent = the full text of <workdir>/ledger.csv . Keep the viewUrl it returns. Do not delete or edit older ledger files.
 11. Deliver to Rob:
    - Send the PDF and the site zip with your file-sending tool.
    - Send a short message: the week, run time (CT), where the lines came from and their snapshot time, whether the GitHub push in step 7 succeeded AND was verified (and the commit hash), then (a) RESULTS: the calls graded this run (from step 4) and the season-to-date record by market and tier (right-wrong and hit rate vs expected), noting that weeks before Week 8 are tests; (b) RB anytime TD: the STRONG and MODERATE rows with Cyrus's chance; (c) QB passing yards: STRONG and MODERATE rows with the call (over or under), the market line, Cyrus's projected yards and Cyrus's chance; (d) one line listing PASS/RECHECK players and why; (e) the link to the new ledger sheet; (f) the reminder: the model is market-informed and not yet backtested against prop lines, so these are projections, not recommendations; re-check inactives about 90 minutes before kickoff.
@@ -480,7 +480,7 @@ def web(out, meta, T, B, rec=None):
         players.append(dict(name=r.rb, pos="RB", team=r.team, opp=r.opp, opp_name=TEAM.get(r.opp, r.opp), game=game(r), kickoff=r.kickoff, tier=(r.tier if r.chance >= 0.5 else "PASS"),
                             projection=None, line=None, side=None, chance=int(round(r.chance * 100)), **e))
     data = dict(season=int(meta["season"]), week=int(meta["week"]), updated=run.strftime("%a %b %d, %I:%M %p CT").replace(" 0", " "), sample=False,
-                next_update=["Wed 6:45 PM CT", "Fri 6:45 PM CT"], rb=rb, qb=qb, passed=passed, record=rec, players=players)
+                next_update=["Wed 6:45 PM CT", "Fri 6:45 PM CT", "Sat 6:45 PM CT"], rb=rb, qb=qb, passed=passed, record=rec, players=players)
     with open(f"{out}/latest.js", "w") as f:
         f.write("// This week's Cyrus card, written by weekly_props.py. Times are Central.\n")
         f.write("window.CYRUS_DATA = " + json.dumps(data, indent=2) + ";\n")

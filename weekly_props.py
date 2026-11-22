@@ -440,7 +440,7 @@ def web(out, meta, T, B, rec=None):
         players.append(dict(name=r.rb, pos="RB", team=r.team, opp=r.opp, opp_name=TEAM.get(r.opp, r.opp), game=game(r), kickoff=r.kickoff, tier=(r.tier if r.chance >= 0.5 else "PASS"),
                             projection=None, line=None, side=None, chance=int(round(r.chance * 100)), **e))
     data = dict(season=int(meta["season"]), week=int(meta["week"]), updated=run.strftime("%a %b %d, %I:%M %p CT").replace(" 0", " "), sample=False,
-                next_update=["Wed 6:45 PM CT", "Fri 6:45 PM CT"], rb=rb, qb=qb, passed=passed, record=rec, players=players)
+                next_update=["Wed 6:45 PM CT", "Fri 6:45 PM CT", "Sat 6:45 PM CT"], rb=rb, qb=qb, passed=passed, record=rec, players=players)
     with open(f"{out}/latest.js", "w") as f:
         f.write("// This week's Cyrus card, written by weekly_props.py. Times are Central.\n")
         f.write("window.CYRUS_DATA = " + json.dumps(data, indent=2) + ";\n")
