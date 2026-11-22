@@ -297,10 +297,12 @@ def explain_qb(r):
     elif abs(gap) < 1: add(False, 3.0, f"the projection ({int(r.proj)}) sits right on the line ({r.line})")
     else: add(False, 3 - abs(gap) / 5, f"the projection ({int(r.proj)}) sits only {abs(gap):.0f} yard{'s' if abs(gap) >= 1.5 else ''} from the line ({r.line}), too close to lean on hard")
     # 2. opponent pass defense
-    rk = int(r.def_rank); weak = rk >= 21; strong = rk <= 10; dw = abs(rk - 16.5) / 4
-    if weak: add(side == "over", dw, f"{opp} {verb(opp, 'gives', 'give')} up {r.def_ypg:.0f} passing yards a game, {rank_txt(rk)}")
-    elif strong: add(side == "under", dw, f"{opp} {verb(opp, 'allows', 'allow')} just {r.def_ypg:.0f} passing yards a game, {rank_txt(rk)}")
-    else: add(False, 0.5, f"the matchup is neutral ({opp} {verb(opp, 'allows', 'allow')} {r.def_ypg:.0f} passing yards a game, {rank_txt(rk)})")
+    # Opponent defense is the lead factor in every explanation: heaviest weight, always stated, and it opens the take.
+    rk = int(r.def_rank); weak = rk >= 21; strong = rk <= 10; dw = 2.0 + abs(rk - 16.5) / 2
+    if weak: mtxt = f"{opp} {verb(opp, 'gives', 'give')} up {r.def_ypg:.0f} passing yards a game, {rank_txt(rk)}"; mok = side == "over"; add(mok, dw, mtxt)
+    elif strong: mtxt = f"{opp} {verb(opp, 'allows', 'allow')} just {r.def_ypg:.0f} passing yards a game, {rank_txt(rk)}"; mok = side == "under"; add(mok, dw, mtxt)
+    else: mtxt = f"{opp} {verb(opp, 'allows', 'allow')} {r.def_ypg:.0f} passing yards a game, {rank_txt(rk)}, middle of the pack"; mok = None; add(False, dw, mtxt)
+    matchup = _sentence(f"matchup {'favors the ' + side if mok else ('works against the ' + side if mok is False and (weak or strong) else 'is neutral')}: {mtxt}")
     # 3. game script: spread and total
     sp = float(r.spread)
     if abs(sp) >= 3:
@@ -336,19 +338,20 @@ def explain_qb(r):
             else: history.append(cap(htxt) + ".")
         else: history.append(cap(htxt) + ".")
     P, C = _rank(pros), _rank(cons)
+    Pt, Ct = [t for t in P if t != mtxt], [t for t in C if t != mtxt]   # the take opens with the matchup, so do not repeat it
     ch = int(round(float(r.chance) * 100))
     if r.tier in ("STRONG", "MODERATE", "SLIGHT"):
         summary = f"Cyrus leans {side} {r.line} for {r.qb} ({ch}% chance). {VERDICT[r.tier]}."
-        take = _sentence(f"the case for the {side} on {r.qb}: {_join(P[:2])}") if P else _sentence(f"Cyrus leans {side} {r.line} on {r.qb} at {ch}%")
-        if C: take += " " + _sentence(f"the catch: {C[0]}")
-        if r.tier == "SLIGHT" and len(C) > len(P): take += " Most of the visible factors point the other way, which is why this is only a lean."
+        take = matchup + " " + (_sentence(f"the case for the {side} on {r.qb}: {_join(Pt[:2])}") if Pt else _sentence(f"Cyrus leans {side} {r.line} on {r.qb} at {ch}%"))
+        if Ct: take += " " + _sentence(f"the catch: {Ct[0]}")
+        if r.tier == "SLIGHT" and len(Ct) > len(Pt): take += " Most of the visible factors point the other way, which is why this is only a lean."
     elif r.tier == "RECHECK":
         summary = f"Cyrus leans {side} {r.line} for {r.qb} ({ch}% chance) but is waiting on an injury decision before calling it."
-        take = _sentence(f"Cyrus leans {side} {r.line} on {r.qb}" + (f": {P[0]}" if P else "")) + " " + _sentence(f"but it is not a call yet: {C[0]}" if C else "but it is waiting on the injury report")
+        take = matchup + " " + _sentence(f"Cyrus leans {side} {r.line} on {r.qb}" + (f": {Pt[0]}" if Pt else "")) + " " + _sentence(f"but it is not a call yet: {Ct[0]}" if Ct else "but it is waiting on the injury report")
     else:
         summary = f"Not a call this week. Cyrus leans {side} {r.line} for {r.qb}, but only at {ch}%, which is not enough of an edge to publish."
-        take = _sentence(f"why {r.qb} is off the card: {_join(C[:2])}") if C else _sentence(f"{r.qb} is off the card")
-        take += " " + (_sentence(f"there is a case for the {side} ({P[0]}), but at {ch}% it is not enough of an edge to publish") if P else _sentence(f"at {ch}% there is not enough of an edge either way to publish"))
+        take = matchup + " " + (_sentence(f"why {r.qb} is off the card: {_join(C[:2])}") if Ct else _sentence(f"{r.qb} is off the card"))
+        take += " " + (_sentence(f"there is a case for the {side} ({Pt[0]}), but at {ch}% it is not enough of an edge to publish") if Pt else _sentence(f"at {ch}% there is not enough of an edge either way to publish"))
     return dict(verdict=VERDICT[r.tier], summary=summary, take=take, pros=[_sentence(t) for t in P], cons=[_sentence(t) for t in C], history=history)
 
 def explain_rb(r):
@@ -364,10 +367,12 @@ def explain_rb(r):
     pr = float(r.prior_rate)
     if pr >= 0.5: add(True, abs(pr - 0.5) * 6, f"his longer track record is solid ({pr:.2f} TDs a game going back to last season)")
     else: add(False, abs(pr - 0.5) * 6 + 0.3, f"his longer track record is thinner ({pr:.2f} TDs a game going back to last season)")
-    rk = int(r.td_rank); dw = abs(rk - 16.5) / 4
-    if rk >= 21: add(True, dw, f"{opp} {verb(opp, 'gives', 'give')} up {r.td_pg:.1f} rushing-and-receiving TDs a game to backs, {rank_txt(rk)}")
-    elif rk <= 10: add(False, dw, f"{opp} {verb(opp, 'allows', 'allow')} just {r.td_pg:.1f} rushing-and-receiving TDs a game, {rank_txt(rk)}")
-    else: add(False, 0.4, f"the matchup is middle of the road ({opp} {verb(opp, 'allows', 'allow')} {r.td_pg:.1f} TDs a game, {rank_txt(rk)})")
+    # Opponent defense is the lead factor in every explanation: heaviest weight, always stated, and it opens the take.
+    rk = int(r.td_rank); dw = 2.0 + abs(rk - 16.5) / 2
+    if rk >= 21: mtxt = f"{opp} {verb(opp, 'gives', 'give')} up {r.td_pg:.1f} rushing-and-receiving TDs a game to backs, {rank_txt(rk)}"; mok = True; add(True, dw, mtxt)
+    elif rk <= 10: mtxt = f"{opp} {verb(opp, 'allows', 'allow')} just {r.td_pg:.1f} rushing-and-receiving TDs a game, {rank_txt(rk)}"; mok = False; add(False, dw, mtxt)
+    else: mtxt = f"{opp} {verb(opp, 'allows', 'allow')} {r.td_pg:.1f} TDs a game, {rank_txt(rk)}, middle of the pack"; mok = None; add(False, dw, mtxt)
+    matchup = _sentence(f"matchup {'favors him' if mok else ('works against him' if mok is False else 'is neutral')}: {mtxt}")
     imp = float(r.implied)
     if imp >= 24: add(True, (imp - 22) / 2, f"the market expects {team} to score about {imp:.0f} points (their season average is {r.tavg:.0f})")
     elif imp <= 20: add(False, (22 - imp) / 2, f"the market only has {team} at about {imp:.0f} points (fewer team points, fewer scoring chances)")
@@ -382,19 +387,20 @@ def explain_rb(r):
         if len(vals) >= 2: add(scored / len(vals) >= 0.5, 1.5, htxt)
         else: history.append(cap(htxt) + ".")
     P, C = _rank(pros), _rank(cons)
+    Pt, Ct = [t for t in P if t != mtxt], [t for t in C if t != mtxt]   # the take opens with the matchup, so do not repeat it
     pct = int(round(ch * 100))
     if r.tier in ("STRONG", "MODERATE"):
         summary = f"Cyrus gives {r.rb} a {pct}% chance to score. {VERDICT[r.tier]}."
-        take = _sentence(f"the case for {r.rb}: {_join(P[:2])}") if P else _sentence(f"Cyrus gives {r.rb} a {pct}% chance to score")
-        take += " " + (_sentence(f"the catch: {C[0]}") if C else "Cyrus sees little working against him this week.")
+        take = matchup + " " + (_sentence(f"the case for {r.rb}: {_join(Pt[:2])}") if Pt else _sentence(f"Cyrus gives {r.rb} a {pct}% chance to score"))
+        take = (take + " " + (_sentence(f"the catch: {Ct[0]}") if Ct else ("" if mok is False else "Cyrus sees little working against him this week."))).strip()
     elif ch >= 0.5:
         summary = f"Cyrus gives {r.rb} a {pct}% chance to score: better than even, but not enough for a confident call."
-        take = _sentence(f"why {r.rb} is off the card: {_join(C[:2])}") if C else _sentence(f"{r.rb} is off the card")
-        take += " " + (_sentence(f"in his favor, {P[0]}, but at {pct}% that is better than a coin flip, not a call") if P else _sentence(f"at {pct}% that is better than a coin flip, not a call"))
+        take = matchup + " " + (_sentence(f"why {r.rb} is off the card: {_join(C[:2])}") if Ct else _sentence(f"{r.rb} is off the card"))
+        take += " " + (_sentence(f"in his favor, {Pt[0]}, but at {pct}% that is better than a coin flip, not a call") if Pt else _sentence(f"at {pct}% that is better than a coin flip, not a call"))
     else:
         summary = f"Cyrus gives {r.rb} a {pct}% chance to score, which is below even money. Not a call this week."
-        take = _sentence(f"why {r.rb} is off the card: {_join(C[:2])}") if C else _sentence(f"why {r.rb} is off the card: nothing stands out against him, but the inputs only add up to {pct}%")
-        take += " " + (_sentence(f"in his favor, {P[0]}, but Cyrus still has him below even money at {pct}%") if P else _sentence(f"Cyrus has him below even money at {pct}%"))
+        take = matchup + " " + (_sentence(f"why {r.rb} is off the card: {_join(C[:2])}") if Ct else _sentence(f"why {r.rb} is off the card: nothing stands out against him, but the inputs only add up to {pct}%"))
+        take += " " + (_sentence(f"in his favor, {Pt[0]}, but Cyrus still has him below even money at {pct}%") if Pt else _sentence(f"Cyrus has him below even money at {pct}%"))
     tier = r.tier if ch >= 0.5 else "PASS"
     return dict(verdict=VERDICT[tier], summary=summary, take=take, pros=[_sentence(t) for t in P], cons=[_sentence(t) for t in C], history=history)
 
